@@ -7,6 +7,7 @@ A local-first **open-source intelligence (OSINT) situation monitor** designed to
 ## What this starter includes
 
 - A reference architecture for ingestion, enrichment, verification, and reporting.
+- A lightweight FastAPI service with investigation, RSS/simulated ingestion, persistent storage, offline-local-LLM preflight checks, feedback memory, and report scaffolding.
 - A lightweight FastAPI service with investigation and report scaffolding.
 - A pluggable processing pipeline abstraction to support multiple sources.
 - Local deployment primitives (`docker-compose.yml`) for API, Postgres, Redis, and Qdrant.
@@ -28,6 +29,7 @@ The monitor should let you:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+pip install -e .[dev]
 pip install -e .
 ```
 
@@ -35,6 +37,16 @@ pip install -e .
 
 ```bash
 cp .env.example .env
+python scripts/generate_api_key.py  # paste into STS_AUTH_API_KEY in .env
+```
+
+### 3) Bootstrap checks (recommended)
+
+```bash
+./scripts/bootstrap.sh
+```
+
+### 4) Run API
 ```
 
 ### 3) Run API
@@ -43,6 +55,7 @@ cp .env.example .env
 uvicorn sts_monitor.main:app --reload --port 8080
 ```
 
+### 5) Optional local infra
 ### 4) Optional local infra
 
 ```bash
@@ -52,6 +65,18 @@ docker compose up -d
 ## API endpoints (starter)
 
 - `GET /health` → service health.
+- `GET /system/preflight` → verify DB, local LLM connectivity/model availability, and workspace wiring.
+- `POST /investigations` → create an investigation topic.
+- `GET /investigations` → list investigations.
+- `POST /investigations/{id}/ingest/rss` → ingest observations from one or more RSS feeds.
+- `POST /investigations/{id}/ingest/simulated` → inject synthetic data to break-test the pipeline.
+- `GET /investigations/{id}/ingestion-runs` → inspect ingestion audit trail and connector failures.
+- `GET /investigations/{id}/observations` → list persisted observations for an investigation.
+- `POST /investigations/{id}/run` → run pipeline against persisted observations (optional local LLM summarization).
+- `POST /investigations/{id}/feedback` → store analyst feedback for iterative memory.
+- `GET /investigations/{id}/memory` → view accumulated feedback memory.
+- `GET /reports/{investigation_id}` → fetch latest report snapshot.
+- `GET /dashboard/summary` → aggregate counters and latest report summaries for UI widgets.
 - `POST /investigations` → create an investigation topic.
 - `GET /investigations` → list investigations.
 - `POST /investigations/{id}/run` → run a mock pipeline pass.
@@ -68,4 +93,47 @@ docker compose up -d
 
 ## Documentation
 
+See [`docs/architecture.md`](docs/architecture.md) for end-to-end design and security model, [`docs/blockers-and-privacy.md`](docs/blockers-and-privacy.md) for practical offline-LLM/internet integration risks, and [`docs/capability-failure-modes.md`](docs/capability-failure-modes.md) for capability-by-capability failure analysis. Use [`docs/offline-buildout-checklist.md`](docs/offline-buildout-checklist.md) for PC wiring and break-test execution, and [`docs/functional-vision-and-gaps.md`](docs/functional-vision-and-gaps.md) for per-function improvement roadmap.
+
+
+## Privacy defaults
+
+- Uses local SQLite by default (`STS_DATABASE_URL=sqlite:///./sts_monitor.db`).
+- Local LLM endpoint is configurable and defaults to localhost (`STS_LOCAL_LLM_URL`).
+- Keep API bound to localhost when running outside containers if you do not need LAN access.
+
+
+## Offline local LLM connection checklist
+
+1. Run a local model server (example: Ollama) on your PC.
+2. Set `STS_LOCAL_LLM_URL` and `STS_LOCAL_LLM_MODEL` in `.env`.
+3. Call `GET /system/preflight` to verify reachability and model availability before enabling LLM summaries.
+4. Use `POST /investigations/{id}/run` with `{ "use_llm": true }` to attempt local model summarization; pipeline falls back to deterministic summary if the model is offline.
+
+## Stress and break testing
+
+- Use `POST /investigations/{id}/ingest/simulated` to inject synthetic contradictory/noisy data.
+- Re-run `/run` repeatedly after simulated ingest to test deduplication, filtering, dispute detection, and report stability.
+- Submit analyst corrections through `/feedback` and inspect `/memory` to verify iterative memory capture.
+
+
+## Authentication
+
+- By default, all endpoints except `GET /health` and `GET /system/preflight` require `X-API-Key`.
+- Configure via `STS_AUTH_API_KEY` and `STS_ENFORCE_AUTH`.
+
+Example:
+
+```bash
+curl -H "X-API-Key: change-me" http://localhost:8080/investigations
+```
+
+
+## End-to-end simulation
+
+Run a full local simulation (preflight, ingest, run, feedback, report, dashboard):
+
+```bash
+python scripts/simulate_full_workflow.py
+```
 See [`docs/architecture.md`](docs/architecture.md) for end-to-end design and security model.
