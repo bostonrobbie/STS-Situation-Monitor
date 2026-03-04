@@ -1,0 +1,180 @@
+from __future__ import annotations
+
+import json
+from dataclasses import asdict
+from datetime import UTC, datetime
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from sts_monitor.llm import LocalLLMClient
+from sts_monitor.models import IngestionRunORM, InvestigationORM, JobORM, ObservationORM, ReportORM
+from sts_monitor.pipeline import Observation, SignalPipeline
+from sts_monitor.simulation import generate_simulated_observations
+
+
+def enqueue_job(
+    session: Session,
+    *,
+    job_type: str,
+    payload: dict[str, Any],
+    run_at: datetime | None = None,
+) -> JobORM:
+    job = JobORM(
+        job_type=job_type,
+        payload_json=json.dumps(payload),
+        status="pending",
+        attempts=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        run_at=run_at or datetime.now(UTC),
+    )
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    return job
+
+
+def _record_ingestion_run(
+    session: Session,
+    investigation_id: str,
+    connector: str,
+    ingested_count: int,
+    failed_count: int,
+    status: str,
+    detail: dict[str, Any],
+) -> None:
+    session.add(
+        IngestionRunORM(
+            investigation_id=investigation_id,
+            connector=connector,
+            started_at=datetime.now(UTC),
+            ingested_count=ingested_count,
+            failed_count=failed_count,
+            status=status,
+            detail_json=json.dumps(detail),
+        )
+    )
+
+
+def process_next_job(session: Session, pipeline: SignalPipeline, llm_client: LocalLLMClient) -> dict[str, Any] | None:
+    now = datetime.now(UTC)
+    job = session.scalars(
+        select(JobORM)
+        .where(JobORM.status == "pending")
+        .where(JobORM.run_at <= now)
+        .order_by(JobORM.created_at.asc())
+        .limit(1)
+    ).first()
+    if not job:
+        return None
+
+    payload = json.loads(job.payload_json)
+    job.status = "running"
+    job.attempts += 1
+    job.updated_at = now
+    session.commit()
+
+    try:
+        if job.job_type == "ingest_simulated":
+            investigation_id = payload["investigation_id"]
+            investigation = session.get(InvestigationORM, investigation_id)
+            if not investigation:
+                raise ValueError("Investigation not found")
+
+            generated = generate_simulated_observations(
+                topic=investigation.topic,
+                batch_size=int(payload.get("batch_size", 20)),
+                include_noise=bool(payload.get("include_noise", True)),
+            )
+            for item in generated:
+                session.add(
+                    ObservationORM(
+                        investigation_id=investigation_id,
+                        source=item.source,
+                        claim=item.claim,
+                        url=item.url,
+                        captured_at=item.captured_at,
+                        reliability_hint=item.reliability_hint,
+                    )
+                )
+
+            _record_ingestion_run(
+                session,
+                investigation_id=investigation_id,
+                connector="simulated_job",
+                ingested_count=len(generated),
+                failed_count=0,
+                status="success",
+                detail={"job_id": job.id},
+            )
+            result = {"job_type": job.job_type, "ingested_count": len(generated)}
+
+        elif job.job_type == "run_pipeline":
+            investigation_id = payload["investigation_id"]
+            use_llm = bool(payload.get("use_llm", False))
+            investigation = session.get(InvestigationORM, investigation_id)
+            if not investigation:
+                raise ValueError("Investigation not found")
+
+            db_observations = session.scalars(
+                select(ObservationORM).where(ObservationORM.investigation_id == investigation_id)
+            ).all()
+            if not db_observations:
+                raise ValueError("No observations available")
+
+            observations = [
+                Observation(
+                    source=item.source,
+                    claim=item.claim,
+                    url=item.url,
+                    captured_at=item.captured_at,
+                    reliability_hint=item.reliability_hint,
+                )
+                for item in db_observations
+            ]
+            pipeline_result = pipeline.run(observations, topic=investigation.topic)
+
+            llm_summary: str | None = None
+            llm_fallback_used = False
+            if use_llm:
+                try:
+                    llm_summary = llm_client.summarize(
+                        f"Topic: {investigation.topic}\nSummary: {pipeline_result.summary}\nOutput concise brief."
+                    )
+                except Exception as exc:
+                    llm_fallback_used = True
+                    llm_summary = f"LLM unavailable, fallback to deterministic summary: {exc}"
+
+            report = ReportORM(
+                investigation_id=investigation_id,
+                generated_at=datetime.now(UTC),
+                summary=llm_summary or pipeline_result.summary,
+                confidence=pipeline_result.confidence,
+                accepted_json=json.dumps([asdict(item) for item in pipeline_result.accepted], default=str),
+                dropped_json=json.dumps([asdict(item) for item in pipeline_result.dropped], default=str),
+            )
+            session.add(report)
+            result = {
+                "job_type": job.job_type,
+                "report_id": report.id,
+                "confidence": pipeline_result.confidence,
+                "llm_fallback_used": llm_fallback_used,
+            }
+
+        else:
+            raise ValueError(f"Unsupported job type: {job.job_type}")
+
+        job.status = "completed"
+        job.last_error = None
+        job.updated_at = datetime.now(UTC)
+        session.commit()
+        return {"job_id": job.id, "status": job.status, "result": result}
+
+    except Exception as exc:
+        job.status = "failed"
+        job.last_error = str(exc)
+        job.updated_at = datetime.now(UTC)
+        session.commit()
+        return {"job_id": job.id, "status": job.status, "error": str(exc)}
