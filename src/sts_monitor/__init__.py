@@ -1,0 +1,1 @@
+"""STS Situation Monitor package."""
