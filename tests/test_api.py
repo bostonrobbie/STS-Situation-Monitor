@@ -246,3 +246,51 @@ def test_job_priority_processed_first() -> None:
     processed = client.post("/jobs/process-next", headers=AUTH)
     assert processed.status_code == 200
     assert processed.json()["job_id"] == high.json()["job_id"]
+
+
+def test_dead_letter_and_requeue_flow() -> None:
+    created = client.post("/investigations", json={"topic": "Dead letter check"}, headers=AUTH)
+    investigation_id = created.json()["id"]
+
+    queued_run = client.post(
+        f"/jobs/enqueue/run/{investigation_id}",
+        json={"use_llm": False, "priority": 50, "max_attempts": 1},
+        headers=AUTH,
+    )
+    assert queued_run.status_code == 200
+
+    # No observations exist, so this job should fail and eventually dead-letter after retries.
+    for _ in range(4):
+        client.post("/jobs/process-next", headers=AUTH)
+
+    dead = client.get("/jobs/dead-letters", headers=AUTH)
+    assert dead.status_code == 200
+    assert len(dead.json()) >= 1
+    dead_id = dead.json()[0]["id"]
+
+    requeued = client.post(f"/jobs/dead-letters/{dead_id}/requeue", headers=AUTH)
+    assert requeued.status_code == 200
+
+    jobs = client.get("/jobs", headers=AUTH)
+    assert jobs.status_code == 200
+    requeued_job = next((item for item in jobs.json() if item["id"] == dead_id), None)
+    assert requeued_job is not None
+    assert requeued_job["attempts"] == 0
+
+
+def test_process_batch_endpoint() -> None:
+    created = client.post("/investigations", json={"topic": "Batch lane"}, headers=AUTH)
+    investigation_id = created.json()["id"]
+
+    client.post(
+        f"/jobs/enqueue/ingest-simulated/{investigation_id}",
+        json={"batch_size": 3, "include_noise": False, "priority": 95},
+        headers=AUTH,
+    )
+    batch = client.post(
+        "/jobs/process-batch",
+        json={"high_quota": 1, "normal_quota": 0, "low_quota": 0},
+        headers=AUTH,
+    )
+    assert batch.status_code == 200
+    assert batch.json()["processed"] >= 1

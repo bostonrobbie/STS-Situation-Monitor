@@ -17,7 +17,7 @@ from sts_monitor.config import settings
 from sts_monitor.connectors import RSSConnector
 from sts_monitor.database import Base, engine, get_session
 from sts_monitor.llm import LocalLLMClient
-from sts_monitor.jobs import create_schedule, enqueue_job, process_next_job, tick_schedules
+from sts_monitor.jobs import create_schedule, enqueue_job, process_job_batch, process_next_job, requeue_dead_letter, tick_schedules
 from sts_monitor.models import FeedbackORM, IngestionRunORM, InvestigationORM, JobORM, JobScheduleORM, ObservationORM, ReportORM
 from sts_monitor.pipeline import Observation, SignalPipeline
 from sts_monitor.security import require_api_key
@@ -60,12 +60,14 @@ class FeedbackRequest(BaseModel):
 class EnqueueRunJobRequest(BaseModel):
     use_llm: bool = False
     priority: int = Field(default=60, ge=1, le=100)
+    max_attempts: int = Field(default=3, ge=1, le=10)
 
 
 class EnqueueSimulatedJobRequest(BaseModel):
     batch_size: int = Field(default=20, ge=1, le=500)
     include_noise: bool = True
     priority: int = Field(default=50, ge=1, le=100)
+    max_attempts: int = Field(default=3, ge=1, le=10)
 
 
 class CreateScheduleRequest(BaseModel):
@@ -74,6 +76,12 @@ class CreateScheduleRequest(BaseModel):
     payload: dict[str, Any]
     interval_seconds: int = Field(default=300, ge=10, le=86_400)
     priority: int = Field(default=50, ge=1, le=100)
+
+
+class ProcessBatchRequest(BaseModel):
+    high_quota: int = Field(default=2, ge=0, le=50)
+    normal_quota: int = Field(default=2, ge=0, le=50)
+    low_quota: int = Field(default=1, ge=0, le=50)
 
 
 @asynccontextmanager
@@ -517,6 +525,7 @@ def enqueue_simulated_ingest_job(
             "include_noise": payload.include_noise,
         },
         priority=payload.priority,
+        max_attempts=payload.max_attempts,
     )
     return {"job_id": job.id, "status": job.status, "job_type": job.job_type}
 
@@ -537,6 +546,7 @@ def enqueue_run_job(
         job_type="run_pipeline",
         payload={"investigation_id": investigation_id, "use_llm": payload.use_llm},
         priority=payload.priority,
+        max_attempts=payload.max_attempts,
     )
     return {"job_id": job.id, "status": job.status, "job_type": job.job_type}
 
@@ -563,7 +573,7 @@ def scheduler_tick(
     _: None = Depends(require_api_key),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    enqueued = tick_schedules(session)
+    enqueued = tick_schedules(session, default_max_attempts=settings.job_max_attempts)
     return {"enqueued": enqueued}
 
 
@@ -592,10 +602,67 @@ def process_next(
     _: None = Depends(require_api_key),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    result = process_next_job(session=session, pipeline=pipeline, llm_client=llm_client)
+    result = process_next_job(
+        session=session,
+        pipeline=pipeline,
+        llm_client=llm_client,
+        retry_backoff_s=settings.job_retry_backoff_s,
+    )
     if result is None:
         return {"status": "idle", "message": "No pending jobs"}
     return result
+
+
+@app.post("/jobs/process-batch")
+def process_batch(
+    payload: ProcessBatchRequest,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    results = process_job_batch(
+        session=session,
+        pipeline=pipeline,
+        llm_client=llm_client,
+        high_quota=payload.high_quota,
+        normal_quota=payload.normal_quota,
+        low_quota=payload.low_quota,
+        retry_backoff_s=settings.job_retry_backoff_s,
+    )
+    return {"processed": len(results), "results": results}
+
+
+@app.get("/jobs/dead-letters")
+def list_dead_letters(
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> list[dict[str, Any]]:
+    rows = session.scalars(
+        select(JobORM).where(JobORM.dead_lettered.is_(True)).order_by(JobORM.updated_at.desc()).limit(200)
+    ).all()
+    return [
+        {
+            "id": row.id,
+            "job_type": row.job_type,
+            "priority": row.priority,
+            "attempts": row.attempts,
+            "max_attempts": row.max_attempts,
+            "last_error": row.last_error,
+            "updated_at": row.updated_at.isoformat(),
+        }
+        for row in rows
+    ]
+
+
+@app.post("/jobs/dead-letters/{job_id}/requeue")
+def requeue_dead_letter_job(
+    job_id: int,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    job = requeue_dead_letter(session, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Dead-letter job not found")
+    return {"job_id": job.id, "status": job.status}
 
 
 @app.get("/jobs")
@@ -612,6 +679,8 @@ def list_jobs(
             "status": row.status,
             "priority": row.priority,
             "attempts": row.attempts,
+            "max_attempts": row.max_attempts,
+            "dead_lettered": row.dead_lettered,
             "last_error": row.last_error,
             "run_at": row.run_at.isoformat(),
             "created_at": row.created_at.isoformat(),
@@ -630,6 +699,7 @@ def dashboard_summary(_: None = Depends(require_api_key), session: Session = Dep
     ingestion_runs = session.scalar(select(func.count(IngestionRunORM.id))) or 0
     jobs_pending = session.scalar(select(func.count(JobORM.id)).where(JobORM.status == "pending")) or 0
     jobs_failed = session.scalar(select(func.count(JobORM.id)).where(JobORM.status == "failed")) or 0
+    jobs_dead_letter = session.scalar(select(func.count(JobORM.id)).where(JobORM.dead_lettered.is_(True))) or 0
     schedules_active = session.scalar(select(func.count(JobScheduleORM.id)).where(JobScheduleORM.active.is_(True))) or 0
 
     latest = session.scalars(select(ReportORM).order_by(ReportORM.generated_at.desc()).limit(5)).all()
@@ -651,6 +721,7 @@ def dashboard_summary(_: None = Depends(require_api_key), session: Session = Dep
         "ingestion_runs": ingestion_runs,
         "jobs_pending": jobs_pending,
         "jobs_failed": jobs_failed,
+        "jobs_dead_letter": jobs_dead_letter,
         "schedules_active": schedules_active,
         "latest_reports": latest_reports,
     }

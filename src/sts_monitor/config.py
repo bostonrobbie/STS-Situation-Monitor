@@ -18,6 +18,8 @@ class Settings:
     enforce_auth: bool = os.getenv("STS_ENFORCE_AUTH", "true").lower() in {"1", "true", "yes"}
     rss_timeout_s: float = float(os.getenv("STS_RSS_TIMEOUT_S", "10"))
     rss_max_retries: int = int(os.getenv("STS_RSS_MAX_RETRIES", "2"))
+    job_max_attempts: int = int(os.getenv("STS_JOB_MAX_ATTEMPTS", "3"))
+    job_retry_backoff_s: int = int(os.getenv("STS_JOB_RETRY_BACKOFF_S", "10"))
 
 
 settings = Settings()

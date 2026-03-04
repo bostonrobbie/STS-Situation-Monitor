@@ -68,8 +68,11 @@ docker compose up -d
 - `GET /investigations/{id}/observations` → list persisted observations for an investigation.
 - `POST /jobs/enqueue/ingest-simulated/{id}` → queue simulated ingestion as background job.
 - `POST /jobs/enqueue/run/{id}` → queue pipeline run as background job.
-- `POST /jobs/process-next` → process the next pending job (priority-aware).
+- `POST /jobs/process-next` → process the next pending job (priority-aware, with retry/dead-letter handling).
+- `POST /jobs/process-batch` → process jobs by priority lanes (high/normal/low quotas).
 - `GET /jobs` → inspect persisted job queue state.
+- `GET /jobs/dead-letters` → inspect dead-letter jobs.
+- `POST /jobs/dead-letters/{id}/requeue` → requeue a dead-letter job for another attempt cycle.
 - `POST /schedules` → create recurring schedule templates for jobs.
 - `POST /schedules/tick` → enqueue due scheduled jobs.
 - `GET /schedules` → inspect configured schedules.
@@ -151,3 +154,11 @@ Run a simple scheduler loop that enqueues due recurring jobs:
 ```bash
 python scripts/scheduler_tick.py
 ```
+
+
+## Queue retry controls
+
+Configure queue retry/dead-letter behavior via:
+
+- `STS_JOB_MAX_ATTEMPTS`
+- `STS_JOB_RETRY_BACKOFF_S`

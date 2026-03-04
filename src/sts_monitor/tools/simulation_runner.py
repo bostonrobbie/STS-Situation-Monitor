@@ -92,6 +92,9 @@ def run_full_workflow_simulation() -> dict:
     process_run = client.post("/jobs/process-next", headers=auth)
     check("process run job", process_run, 200)
 
+    process_batch = client.post("/jobs/process-batch", json={"high_quota": 1, "normal_quota": 1, "low_quota": 1}, headers=auth)
+    check("process job batch", process_batch, 200)
+
     run_no_llm = client.post(f"/investigations/{investigation_id}/run", json={"use_llm": False}, headers=auth)
     check("run pipeline no llm", run_no_llm, 200)
 
@@ -116,6 +119,9 @@ def run_full_workflow_simulation() -> dict:
 
     jobs_list = client.get("/jobs", headers=auth)
     check("list jobs", jobs_list, 200)
+
+    dead_letters = client.get("/jobs/dead-letters", headers=auth)
+    check("list dead letters", dead_letters, 200)
 
     dashboard = client.get("/dashboard/summary", headers=auth)
     check("dashboard summary", dashboard, 200)
