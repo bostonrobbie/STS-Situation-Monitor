@@ -198,3 +198,51 @@ def test_enqueue_and_process_jobs() -> None:
     jobs = client.get("/jobs", headers=AUTH)
     assert jobs.status_code == 200
     assert len(jobs.json()) >= 2
+
+
+def test_schedule_tick_enqueues_jobs() -> None:
+    created = client.post("/investigations", json={"topic": "River event"}, headers=AUTH)
+    investigation_id = created.json()["id"]
+
+    schedule = client.post(
+        "/schedules",
+        json={
+            "name": "river-sim-ingest",
+            "job_type": "ingest_simulated",
+            "payload": {"investigation_id": investigation_id, "batch_size": 5, "include_noise": False},
+            "interval_seconds": 10,
+            "priority": 80,
+        },
+        headers=AUTH,
+    )
+    assert schedule.status_code == 200
+
+    tick = client.post("/schedules/tick", headers=AUTH)
+    assert tick.status_code == 200
+    assert tick.json()["enqueued"] >= 1
+
+    schedules = client.get("/schedules", headers=AUTH)
+    assert schedules.status_code == 200
+    assert schedules.json()[0]["name"] == "river-sim-ingest"
+
+
+def test_job_priority_processed_first() -> None:
+    created = client.post("/investigations", json={"topic": "Airport outage"}, headers=AUTH)
+    investigation_id = created.json()["id"]
+
+    low = client.post(
+        f"/jobs/enqueue/ingest-simulated/{investigation_id}",
+        json={"batch_size": 3, "include_noise": False, "priority": 10},
+        headers=AUTH,
+    )
+    high = client.post(
+        f"/jobs/enqueue/ingest-simulated/{investigation_id}",
+        json={"batch_size": 3, "include_noise": False, "priority": 90},
+        headers=AUTH,
+    )
+    assert low.status_code == 200
+    assert high.status_code == 200
+
+    processed = client.post("/jobs/process-next", headers=AUTH)
+    assert processed.status_code == 200
+    assert processed.json()["job_id"] == high.json()["job_id"]

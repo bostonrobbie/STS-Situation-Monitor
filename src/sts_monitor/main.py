@@ -17,8 +17,8 @@ from sts_monitor.config import settings
 from sts_monitor.connectors import RSSConnector
 from sts_monitor.database import Base, engine, get_session
 from sts_monitor.llm import LocalLLMClient
-from sts_monitor.jobs import enqueue_job, process_next_job
-from sts_monitor.models import FeedbackORM, IngestionRunORM, InvestigationORM, JobORM, ObservationORM, ReportORM
+from sts_monitor.jobs import create_schedule, enqueue_job, process_next_job, tick_schedules
+from sts_monitor.models import FeedbackORM, IngestionRunORM, InvestigationORM, JobORM, JobScheduleORM, ObservationORM, ReportORM
 from sts_monitor.pipeline import Observation, SignalPipeline
 from sts_monitor.security import require_api_key
 from sts_monitor.simulation import generate_simulated_observations
@@ -57,13 +57,23 @@ class FeedbackRequest(BaseModel):
 
 
 
+class EnqueueRunJobRequest(BaseModel):
+    use_llm: bool = False
+    priority: int = Field(default=60, ge=1, le=100)
+
+
 class EnqueueSimulatedJobRequest(BaseModel):
     batch_size: int = Field(default=20, ge=1, le=500)
     include_noise: bool = True
+    priority: int = Field(default=50, ge=1, le=100)
 
 
-class EnqueueRunJobRequest(BaseModel):
-    use_llm: bool = False
+class CreateScheduleRequest(BaseModel):
+    name: str = Field(min_length=3, max_length=120)
+    job_type: str = Field(pattern="^(ingest_simulated|run_pipeline)$")
+    payload: dict[str, Any]
+    interval_seconds: int = Field(default=300, ge=10, le=86_400)
+    priority: int = Field(default=50, ge=1, le=100)
 
 
 @asynccontextmanager
@@ -506,6 +516,7 @@ def enqueue_simulated_ingest_job(
             "batch_size": payload.batch_size,
             "include_noise": payload.include_noise,
         },
+        priority=payload.priority,
     )
     return {"job_id": job.id, "status": job.status, "job_type": job.job_type}
 
@@ -525,8 +536,55 @@ def enqueue_run_job(
         session,
         job_type="run_pipeline",
         payload={"investigation_id": investigation_id, "use_llm": payload.use_llm},
+        priority=payload.priority,
     )
     return {"job_id": job.id, "status": job.status, "job_type": job.job_type}
+
+
+@app.post("/schedules")
+def create_job_schedule(
+    payload: CreateScheduleRequest,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    schedule = create_schedule(
+        session,
+        name=payload.name,
+        job_type=payload.job_type,
+        payload=payload.payload,
+        interval_seconds=payload.interval_seconds,
+        priority=payload.priority,
+    )
+    return {"schedule_id": schedule.id, "name": schedule.name, "active": schedule.active}
+
+
+@app.post("/schedules/tick")
+def scheduler_tick(
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    enqueued = tick_schedules(session)
+    return {"enqueued": enqueued}
+
+
+@app.get("/schedules")
+def list_schedules(
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> list[dict[str, Any]]:
+    rows = session.scalars(select(JobScheduleORM).order_by(JobScheduleORM.created_at.desc())).all()
+    return [
+        {
+            "id": row.id,
+            "name": row.name,
+            "job_type": row.job_type,
+            "interval_seconds": row.interval_seconds,
+            "priority": row.priority,
+            "active": row.active,
+            "last_enqueued_at": row.last_enqueued_at.isoformat() if row.last_enqueued_at else None,
+        }
+        for row in rows
+    ]
 
 
 @app.post("/jobs/process-next")
@@ -552,6 +610,7 @@ def list_jobs(
             "id": row.id,
             "job_type": row.job_type,
             "status": row.status,
+            "priority": row.priority,
             "attempts": row.attempts,
             "last_error": row.last_error,
             "run_at": row.run_at.isoformat(),
@@ -571,6 +630,7 @@ def dashboard_summary(_: None = Depends(require_api_key), session: Session = Dep
     ingestion_runs = session.scalar(select(func.count(IngestionRunORM.id))) or 0
     jobs_pending = session.scalar(select(func.count(JobORM.id)).where(JobORM.status == "pending")) or 0
     jobs_failed = session.scalar(select(func.count(JobORM.id)).where(JobORM.status == "failed")) or 0
+    schedules_active = session.scalar(select(func.count(JobScheduleORM.id)).where(JobScheduleORM.active.is_(True))) or 0
 
     latest = session.scalars(select(ReportORM).order_by(ReportORM.generated_at.desc()).limit(5)).all()
     latest_reports = [
@@ -591,5 +651,6 @@ def dashboard_summary(_: None = Depends(require_api_key), session: Session = Dep
         "ingestion_runs": ingestion_runs,
         "jobs_pending": jobs_pending,
         "jobs_failed": jobs_failed,
+        "schedules_active": schedules_active,
         "latest_reports": latest_reports,
     }

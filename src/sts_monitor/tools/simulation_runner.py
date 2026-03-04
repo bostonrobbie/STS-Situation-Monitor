@@ -63,6 +63,25 @@ def run_full_workflow_simulation() -> dict:
     observations = client.get(f"/investigations/{investigation_id}/observations", headers=auth)
     check("list observations", observations, 200)
 
+    schedule = client.post(
+        "/schedules",
+        json={
+            "name": "harbor-sim-run",
+            "job_type": "run_pipeline",
+            "payload": {"investigation_id": investigation_id, "use_llm": False},
+            "interval_seconds": 10,
+            "priority": 70,
+        },
+        headers=auth,
+    )
+    check("create schedule", schedule, 200)
+
+    tick = client.post("/schedules/tick", headers=auth)
+    check("tick schedules", tick, 200)
+
+    schedules = client.get("/schedules", headers=auth)
+    check("list schedules", schedules, 200)
+
     queue_run = client.post(
         f"/jobs/enqueue/run/{investigation_id}",
         json={"use_llm": False},

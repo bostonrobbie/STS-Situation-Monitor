@@ -5,11 +5,11 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from sts_monitor.llm import LocalLLMClient
-from sts_monitor.models import IngestionRunORM, InvestigationORM, JobORM, ObservationORM, ReportORM
+from sts_monitor.models import IngestionRunORM, InvestigationORM, JobORM, JobScheduleORM, ObservationORM, ReportORM
 from sts_monitor.pipeline import Observation, SignalPipeline
 from sts_monitor.simulation import generate_simulated_observations
 
@@ -20,11 +20,14 @@ def enqueue_job(
     job_type: str,
     payload: dict[str, Any],
     run_at: datetime | None = None,
+    priority: int = 50,
 ) -> JobORM:
+    bounded_priority = max(1, min(100, priority))
     job = JobORM(
         job_type=job_type,
         payload_json=json.dumps(payload),
         status="pending",
+        priority=bounded_priority,
         attempts=0,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -34,6 +37,62 @@ def enqueue_job(
     session.commit()
     session.refresh(job)
     return job
+
+
+def create_schedule(
+    session: Session,
+    *,
+    name: str,
+    job_type: str,
+    payload: dict[str, Any],
+    interval_seconds: int,
+    priority: int = 50,
+) -> JobScheduleORM:
+    schedule = JobScheduleORM(
+        name=name,
+        job_type=job_type,
+        payload_json=json.dumps(payload),
+        interval_seconds=max(10, interval_seconds),
+        priority=max(1, min(100, priority)),
+        active=True,
+        last_enqueued_at=None,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    session.add(schedule)
+    session.commit()
+    session.refresh(schedule)
+    return schedule
+
+
+def tick_schedules(session: Session, now: datetime | None = None) -> int:
+    current = now or datetime.now(UTC)
+    schedules = session.scalars(select(JobScheduleORM).where(JobScheduleORM.active.is_(True))).all()
+    enqueued = 0
+
+    for schedule in schedules:
+        if schedule.last_enqueued_at is None:
+            due = True
+        else:
+            elapsed = (current - schedule.last_enqueued_at).total_seconds()
+            due = elapsed >= schedule.interval_seconds
+
+        if not due:
+            continue
+
+        enqueue_job(
+            session,
+            job_type=schedule.job_type,
+            payload=json.loads(schedule.payload_json),
+            run_at=current,
+            priority=schedule.priority,
+        )
+        schedule.last_enqueued_at = current
+        schedule.updated_at = current
+        session.commit()
+        enqueued += 1
+
+    return enqueued
 
 
 def _record_ingestion_run(
@@ -64,7 +123,7 @@ def process_next_job(session: Session, pipeline: SignalPipeline, llm_client: Loc
         select(JobORM)
         .where(JobORM.status == "pending")
         .where(JobORM.run_at <= now)
-        .order_by(JobORM.created_at.asc())
+        .order_by(desc(JobORM.priority), JobORM.created_at.asc())
         .limit(1)
     ).first()
     if not job:

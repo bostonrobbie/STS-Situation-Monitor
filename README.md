@@ -68,8 +68,11 @@ docker compose up -d
 - `GET /investigations/{id}/observations` → list persisted observations for an investigation.
 - `POST /jobs/enqueue/ingest-simulated/{id}` → queue simulated ingestion as background job.
 - `POST /jobs/enqueue/run/{id}` → queue pipeline run as background job.
-- `POST /jobs/process-next` → process the next pending job (for local worker/dev use).
+- `POST /jobs/process-next` → process the next pending job (priority-aware).
 - `GET /jobs` → inspect persisted job queue state.
+- `POST /schedules` → create recurring schedule templates for jobs.
+- `POST /schedules/tick` → enqueue due scheduled jobs.
+- `GET /schedules` → inspect configured schedules.
 - `POST /investigations/{id}/run` → run pipeline against persisted observations (optional local LLM summarization).
 - `POST /investigations/{id}/feedback` → store analyst feedback for iterative memory.
 - `GET /investigations/{id}/memory` → view accumulated feedback memory.
@@ -138,4 +141,13 @@ Run a simple in-house worker loop that processes queued jobs:
 
 ```bash
 python scripts/job_worker.py
+```
+
+
+## Scheduler tick loop
+
+Run a simple scheduler loop that enqueues due recurring jobs:
+
+```bash
+python scripts/scheduler_tick.py
 ```

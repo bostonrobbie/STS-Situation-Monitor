@@ -55,3 +55,10 @@
 
 - Enqueue jobs via API (`/jobs/enqueue/...`) for simulated ingest or pipeline runs.
 - Process queued jobs with `python scripts/job_worker.py` (or `POST /jobs/process-next` for manual dev testing).
+
+
+## Recurring schedules
+
+- Create schedule templates with `POST /schedules`.
+- Tick scheduler with `python scripts/scheduler_tick.py` (or `POST /schedules/tick`).
+- Worker (`python scripts/job_worker.py`) then processes enqueued jobs by priority.

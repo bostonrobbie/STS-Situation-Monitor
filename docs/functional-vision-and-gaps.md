@@ -112,7 +112,7 @@ This document captures what each major system function does today, what it lacks
 
 ## 10) Recommended build order
 
-1. Expand the new background job queue with recurring scheduler policies and priority lanes.
+1. Continue hardening the implemented queue+schedule foundation with retry policies, dead-letter lanes, and priority quotas.
 2. Add normalized claim/evidence tables.
 3. Add connector expansion (Reddit + web crawler + optional X API where legal).
 4. Add structured reporting contract with citation enforcement.
