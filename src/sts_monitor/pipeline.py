@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from datetime import datetime, UTC
 from typing import Iterable
 
 
@@ -26,6 +27,7 @@ class PipelineResult:
 
 class SignalPipeline:
     """Prototype ranking/filtering pipeline with basic dedup and dispute detection."""
+    """Simple ranking/filtering pipeline for rapid prototyping."""
 
     def __init__(self, min_reliability: float = 0.45) -> None:
         self.min_reliability = min_reliability
@@ -92,6 +94,15 @@ class SignalPipeline:
                 accepted.append(adjusted)
             else:
                 dropped.append(adjusted)
+    def run(self, observations: Iterable[Observation], topic: str) -> PipelineResult:
+        accepted: list[Observation] = []
+        dropped: list[Observation] = []
+
+        for observation in observations:
+            if observation.reliability_hint >= self.min_reliability:
+                accepted.append(observation)
+            else:
+                dropped.append(observation)
 
         confidence = 0.0
         if accepted:
@@ -102,6 +113,9 @@ class SignalPipeline:
             f"Topic '{topic}': {len(accepted)} high-signal observations retained, "
             f"{len(dropped)} filtered as low-confidence noise, "
             f"{len(disputed_claims)} disputed claim cluster(s)."
+        summary = (
+            f"Topic '{topic}': {len(accepted)} high-signal observations retained, "
+            f"{len(dropped)} filtered as low-confidence noise."
         )
 
         return PipelineResult(
