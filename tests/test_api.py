@@ -7,6 +7,9 @@ from sts_monitor.connectors.base import ConnectorResult
 from sts_monitor.database import Base, engine
 from sts_monitor.main import app
 from sts_monitor.pipeline import Observation
+from fastapi.testclient import TestClient
+
+from sts_monitor.main import app
 
 
 client = TestClient(app)
@@ -49,6 +52,7 @@ def test_run_requires_observations() -> None:
 
 
 def test_create_ingest_and_run_investigation(monkeypatch) -> None:
+def test_create_and_run_investigation() -> None:
     created = client.post("/investigations", json={"topic": "Major incident"})
     assert created.status_code == 200
     investigation_id = created.json()["id"]
@@ -153,3 +157,4 @@ def test_dashboard_summary() -> None:
     assert payload["investigations"] == 0
     assert payload["observations"] == 0
     assert payload["reports"] == 0
+    assert "confidence" in payload

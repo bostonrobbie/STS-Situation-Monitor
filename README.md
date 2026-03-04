@@ -8,6 +8,7 @@ A local-first **open-source intelligence (OSINT) situation monitor** designed to
 
 - A reference architecture for ingestion, enrichment, verification, and reporting.
 - A lightweight FastAPI service with investigation, RSS/simulated ingestion, persistent storage, offline-local-LLM preflight checks, feedback memory, and report scaffolding.
+- A lightweight FastAPI service with investigation and report scaffolding.
 - A pluggable processing pipeline abstraction to support multiple sources.
 - Local deployment primitives (`docker-compose.yml`) for API, Postgres, Redis, and Qdrant.
 
@@ -63,6 +64,10 @@ docker compose up -d
 - `GET /investigations/{id}/memory` → view accumulated feedback memory.
 - `GET /reports/{investigation_id}` → fetch latest report snapshot.
 - `GET /dashboard/summary` → aggregate counters and latest report summaries for UI widgets.
+- `POST /investigations` → create an investigation topic.
+- `GET /investigations` → list investigations.
+- `POST /investigations/{id}/run` → run a mock pipeline pass.
+- `GET /reports/{investigation_id}` → fetch latest report snapshot.
 
 ## Roadmap (high level)
 
@@ -97,3 +102,4 @@ See [`docs/architecture.md`](docs/architecture.md) for end-to-end design and sec
 - Use `POST /investigations/{id}/ingest/simulated` to inject synthetic contradictory/noisy data.
 - Re-run `/run` repeatedly after simulated ingest to test deduplication, filtering, dispute detection, and report stability.
 - Submit analyst corrections through `/feedback` and inspect `/memory` to verify iterative memory capture.
+See [`docs/architecture.md`](docs/architecture.md) for end-to-end design and security model.
