@@ -1,5 +1,11 @@
 from sts_monitor.pipeline import Observation, SignalPipeline
 
+import pytest
+
+from sts_monitor.pipeline import Observation, SignalPipeline
+
+pytestmark = pytest.mark.unit
+
 
 def test_pipeline_filters_low_reliability_items() -> None:
     pipeline = SignalPipeline(min_reliability=0.5)
@@ -41,3 +47,18 @@ def test_pipeline_finds_disputed_claim_clusters() -> None:
     )
 
     assert len(result.disputed_claims) >= 1
+
+
+def test_pipeline_confidence_penalizes_disputes_on_large_batches() -> None:
+    pipeline = SignalPipeline(min_reliability=0.1)
+    result = pipeline.run(
+        [
+            Observation(source="rss:a", claim="Bridge reopened", url="u1", reliability_hint=0.9),
+            Observation(source="reddit:b", claim="Bridge reopened", url="u2", reliability_hint=0.8),
+            Observation(source="rss:c", claim="Bridge reopened is false", url="u3", reliability_hint=0.85),
+        ],
+        topic="topic",
+    )
+
+    assert len(result.disputed_claims) >= 1
+    assert result.confidence < 0.9

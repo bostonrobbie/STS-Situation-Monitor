@@ -15,6 +15,11 @@ class InvestigationORM(Base):
     topic: Mapped[str] = mapped_column(String(300), nullable=False)
     seed_query: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    priority: Mapped[int] = mapped_column(Integer, default=50, index=True)
+    owner: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), default="open", index=True)
+    sla_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
 
     observations: Mapped[list[ObservationORM]] = relationship(back_populates="investigation", cascade="all, delete-orphan")
     reports: Mapped[list[ReportORM]] = relationship(back_populates="investigation", cascade="all, delete-orphan")
@@ -105,3 +110,115 @@ class JobScheduleORM(Base):
     last_enqueued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+
+class ResearchSourceORM(Base):
+    __tablename__ = "research_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    source_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(1200), nullable=False)
+    trust_score: Mapped[float] = mapped_column(Float, default=0.5)
+    active: Mapped[bool] = mapped_column(default=True)
+    tags_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+
+class AlertRuleORM(Base):
+    __tablename__ = "alert_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    investigation_id: Mapped[str] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    min_observations: Mapped[int] = mapped_column(Integer, default=20)
+    min_disputed_claims: Mapped[int] = mapped_column(Integer, default=1)
+    cooldown_seconds: Mapped[int] = mapped_column(Integer, default=900)
+    active: Mapped[bool] = mapped_column(default=True)
+    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+    investigation: Mapped[InvestigationORM] = relationship()
+
+
+class AlertEventORM(Base):
+    __tablename__ = "alert_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    rule_id: Mapped[int] = mapped_column(ForeignKey("alert_rules.id", ondelete="CASCADE"), index=True)
+    investigation_id: Mapped[str] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
+    triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+    severity: Mapped[str] = mapped_column(String(30), default="warning")
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    rule: Mapped[AlertRuleORM] = relationship()
+    investigation: Mapped[InvestigationORM] = relationship()
+
+
+class ClaimORM(Base):
+    __tablename__ = "claims"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    investigation_id: Mapped[str] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
+    report_id: Mapped[int] = mapped_column(ForeignKey("reports.id", ondelete="CASCADE"), index=True)
+    claim_text: Mapped[str] = mapped_column(Text, nullable=False)
+    stance: Mapped[str] = mapped_column(String(20), default="unknown", index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+    investigation: Mapped[InvestigationORM] = relationship()
+    report: Mapped[ReportORM] = relationship()
+
+
+class ClaimEvidenceORM(Base):
+    __tablename__ = "claim_evidence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    claim_id: Mapped[int] = mapped_column(ForeignKey("claims.id", ondelete="CASCADE"), index=True)
+    observation_id: Mapped[int] = mapped_column(ForeignKey("observations.id", ondelete="CASCADE"), index=True)
+    weight: Mapped[float] = mapped_column(Float, default=0.5)
+    rationale: Mapped[str] = mapped_column(String(300), default="text-match")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+    claim: Mapped[ClaimORM] = relationship()
+    observation: Mapped[ObservationORM] = relationship()
+
+
+class APIKeyORM(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    label: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    key_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    role: Mapped[str] = mapped_column(String(20), default="analyst", index=True)
+    active: Mapped[bool] = mapped_column(default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+
+class AuditLogORM(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_label: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    actor_role: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    action: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    resource_type: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    resource_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+
+class SearchProfileORM(Base):
+    __tablename__ = "search_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    investigation_id: Mapped[str | None] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), nullable=True, index=True)
+    include_terms_json: Mapped[str] = mapped_column(Text, default="[]")
+    exclude_terms_json: Mapped[str] = mapped_column(Text, default="[]")
+    synonyms_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+    investigation: Mapped[InvestigationORM | None] = relationship()
