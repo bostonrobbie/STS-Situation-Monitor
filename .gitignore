@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 .env
 *.pyc
+*.egg-info/
+*.db
+sts_monitor.db
