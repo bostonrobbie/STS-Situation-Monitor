@@ -8,6 +8,7 @@ A local-first **open-source intelligence (OSINT) situation monitor** designed to
 
 - A reference architecture for ingestion, enrichment, verification, and reporting.
 - A lightweight FastAPI service with investigation, RSS/simulated ingestion, persistent storage, offline-local-LLM preflight checks, feedback memory, and report scaffolding.
+- A lightweight FastAPI service with investigation and report scaffolding.
 - A pluggable processing pipeline abstraction to support multiple sources.
 - Local deployment primitives (`docker-compose.yml`) for API, Postgres, Redis, and Qdrant.
 
@@ -29,6 +30,7 @@ The monitor should let you:
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
+pip install -e .
 ```
 
 ### 2) Configure
@@ -45,12 +47,16 @@ python scripts/generate_api_key.py  # paste into STS_AUTH_API_KEY in .env
 ```
 
 ### 4) Run API
+```
+
+### 3) Run API
 
 ```bash
 uvicorn sts_monitor.main:app --reload --port 8080
 ```
 
 ### 5) Optional local infra
+### 4) Optional local infra
 
 ```bash
 docker compose up -d
@@ -81,6 +87,10 @@ docker compose up -d
 - `GET /investigations/{id}/memory` → view accumulated feedback memory.
 - `GET /reports/{investigation_id}` → fetch latest report snapshot.
 - `GET /dashboard/summary` → aggregate counters and latest report summaries for UI widgets.
+- `POST /investigations` → create an investigation topic.
+- `GET /investigations` → list investigations.
+- `POST /investigations/{id}/run` → run a mock pipeline pass.
+- `GET /reports/{investigation_id}` → fetch latest report snapshot.
 
 ## Roadmap (high level)
 
@@ -162,3 +172,4 @@ Configure queue retry/dead-letter behavior via:
 
 - `STS_JOB_MAX_ATTEMPTS`
 - `STS_JOB_RETRY_BACKOFF_S`
+See [`docs/architecture.md`](docs/architecture.md) for end-to-end design and security model.

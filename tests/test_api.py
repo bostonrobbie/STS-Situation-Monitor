@@ -17,6 +17,12 @@ AUTH = {"X-API-Key": "change-me"}
 def reset_db() -> None:
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+from fastapi.testclient import TestClient
+
+from sts_monitor.main import app
+
+
+client = TestClient(app)
 
 
 def test_health() -> None:
@@ -294,3 +300,13 @@ def test_process_batch_endpoint() -> None:
     )
     assert batch.status_code == 200
     assert batch.json()["processed"] >= 1
+def test_create_and_run_investigation() -> None:
+    created = client.post("/investigations", json={"topic": "Major incident"})
+    assert created.status_code == 200
+    investigation_id = created.json()["id"]
+
+    run = client.post(f"/investigations/{investigation_id}/run")
+    assert run.status_code == 200
+    payload = run.json()
+    assert payload["investigation_id"] == investigation_id
+    assert "confidence" in payload
