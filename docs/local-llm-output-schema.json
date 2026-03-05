@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sts-situation-monitor.local/schemas/local-llm-output.schema.json",
+  "title": "STS Local LLM Intelligence Output",
+  "type": "object",
+  "required": [
+    "topic",
+    "overall_assessment",
+    "overall_confidence",
+    "key_claims",
+    "disputed_claims",
+    "gaps",
+    "next_actions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "topic": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "overall_assessment": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 5000
+    },
+    "overall_confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "confidence_rationale": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "key_claims": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "$ref": "#/$defs/claim"
+      }
+    },
+    "disputed_claims": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "$ref": "#/$defs/claim"
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "maxItems": 25,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      }
+    },
+    "next_actions": {
+      "type": "array",
+      "maxItems": 25,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      }
+    }
+  },
+  "$defs": {
+    "claim": {
+      "type": "object",
+      "required": [
+        "statement",
+        "status",
+        "confidence",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "statement": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "disputed",
+            "unknown",
+            "monitor-next"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reasoning": {
+          "type": "string",
+          "maxLength": 1500
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/evidenceRef"
+          }
+        }
+      }
+    },
+    "evidenceRef": {
+      "type": "object",
+      "required": [
+        "source",
+        "url",
+        "captured_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "observation_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "claim_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "snippet": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    }
+  }
+}
