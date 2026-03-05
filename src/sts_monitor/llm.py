@@ -11,6 +11,7 @@ class LLMHealth:
     reachable: bool
     model_available: bool
     detail: str
+    latency_ms: float | None = None
 
 
 class LocalLLMClient:
@@ -21,6 +22,7 @@ class LocalLLMClient:
         self.max_retries = max_retries
 
     def health(self) -> LLMHealth:
+        started = time.perf_counter()
         try:
             response = httpx.get(f"{self.base_url}/api/tags", timeout=self.timeout_s)
             response.raise_for_status()
@@ -29,9 +31,11 @@ class LocalLLMClient:
             names = {item.get("name", "") for item in models}
             model_available = any(name.startswith(self.model) for name in names)
             detail = "ok" if model_available else f"model '{self.model}' not found"
-            return LLMHealth(reachable=True, model_available=model_available, detail=detail)
+            latency_ms = round((time.perf_counter() - started) * 1000, 2)
+            return LLMHealth(reachable=True, model_available=model_available, detail=detail, latency_ms=latency_ms)
         except Exception as exc:  # network/runtime defensive check
-            return LLMHealth(reachable=False, model_available=False, detail=str(exc))
+            latency_ms = round((time.perf_counter() - started) * 1000, 2)
+            return LLMHealth(reachable=False, model_available=False, detail=str(exc), latency_ms=latency_ms)
 
     def summarize(self, prompt: str) -> str:
         payload = {

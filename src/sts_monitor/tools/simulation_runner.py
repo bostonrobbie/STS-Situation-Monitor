@@ -129,3 +129,87 @@ def run_full_workflow_simulation() -> dict:
     out["passed"] = all(item["ok"] for item in out["checks"])
     out["summary"] = json.dumps({"total_checks": len(out["checks"]), "passed": out["passed"]})
     return out
+
+
+def summarize_simulation(result: dict) -> dict[str, object]:
+    checks = result.get("checks", [])
+    if not isinstance(checks, list):
+        checks = []
+
+    failed_names = [
+        item.get("name", "unknown")
+        for item in checks
+        if isinstance(item, dict) and not item.get("ok", False)
+    ]
+
+    dashboard = None
+    preflight = None
+    for item in checks:
+        if not isinstance(item, dict):
+            continue
+        if item.get("name") == "dashboard summary":
+            dashboard = item.get("body")
+        if item.get("name") == "preflight":
+            preflight = item.get("body")
+
+    return {
+        "passed": bool(result.get("passed", False)),
+        "total_checks": len(checks),
+        "failed_checks": failed_names,
+        "dashboard": dashboard if isinstance(dashboard, dict) else None,
+        "preflight": preflight if isinstance(preflight, dict) else None,
+    }
+
+
+def format_simulation_report(result: dict) -> str:
+    summary = summarize_simulation(result)
+    status = "PASS" if summary["passed"] else "FAIL"
+
+    lines = [
+        "STS Simulated Functioning Report",
+        "=" * 32,
+        f"Status: {status}",
+        f"Checks: {summary['total_checks']}",
+    ]
+
+    if summary["failed_checks"]:
+        lines.append("Failed checks:")
+        lines.extend(f"- {name}" for name in summary["failed_checks"])
+
+    preflight = summary.get("preflight")
+    if isinstance(preflight, dict):
+        llm = preflight.get("llm", {})
+        readiness = preflight.get("readiness", {})
+        lines.extend(
+            [
+                "",
+                "Preflight:",
+                f"- readiness: {readiness.get('level', 'unknown')} ({readiness.get('score', 'n/a')})",
+                f"- llm reachable: {llm.get('reachable', False)}",
+                f"- llm model available: {llm.get('model_available', False)}",
+            ]
+        )
+
+    dashboard = summary.get("dashboard")
+    if isinstance(dashboard, dict):
+        lines.extend(
+            [
+                "",
+                "Dashboard snapshot:",
+                f"- investigations: {dashboard.get('investigations', 0)}",
+                f"- observations: {dashboard.get('observations', 0)}",
+                f"- reports: {dashboard.get('reports', 0)}",
+                f"- claims: {dashboard.get('claims', 0)}",
+                f"- jobs_pending: {dashboard.get('jobs_pending', 0)}",
+                f"- jobs_failed: {dashboard.get('jobs_failed', 0)}",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "Tip: run `python scripts/demo_simulated_functioning.py --json` for full event-level output.",
+        ]
+    )
+
+    return "\n".join(lines)
