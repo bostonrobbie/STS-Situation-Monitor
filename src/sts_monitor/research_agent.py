@@ -102,7 +102,7 @@ class ResearchIteration:
     started_at: datetime
     observations_collected: int
     connectors_used: list[str]
-    llm_response: dict[str, Any] | None
+    llm_response: dict[str, Any] | None = None
     errors: list[str] = field(default_factory=list)
     duration_s: float = 0.0
 

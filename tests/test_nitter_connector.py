@@ -236,7 +236,7 @@ def test_nitter_missing_published_parsed(monkeypatch) -> None:
         lambda url, **kw: _make_parsed(entries),
     )
 
-    connector = NitterConnector(instances=["https://nitter.test"])
+    connector = NitterConnector(instances=["https://nitter.test"], accounts=["testuser"])
     result = connector.collect(query=None)
 
     assert len(result.observations) == 1
