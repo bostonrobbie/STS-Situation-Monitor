@@ -29,6 +29,30 @@ class Settings:
     alert_webhook_timeout_s: float = float(os.getenv("STS_ALERT_WEBHOOK_TIMEOUT_S", "5"))
     enforce_report_lineage_gate: bool = os.getenv("STS_ENFORCE_REPORT_LINEAGE_GATE", "false").lower() in {"1", "true", "yes"}
     report_min_lineage_coverage: float = float(os.getenv("STS_REPORT_MIN_LINEAGE_COVERAGE", "0.7"))
+    # --- New data source connectors ---
+    gdelt_timeout_s: float = float(os.getenv("STS_GDELT_TIMEOUT_S", "15"))
+    gdelt_default_timespan: str = os.getenv("STS_GDELT_DEFAULT_TIMESPAN", "3h")
+    gdelt_max_records: int = int(os.getenv("STS_GDELT_MAX_RECORDS", "75"))
+    usgs_min_magnitude: float = float(os.getenv("STS_USGS_MIN_MAGNITUDE", "4.0"))
+    usgs_timeout_s: float = float(os.getenv("STS_USGS_TIMEOUT_S", "10"))
+    usgs_lookback_hours: int = int(os.getenv("STS_USGS_LOOKBACK_HOURS", "24"))
+    nasa_firms_map_key: str = os.getenv("STS_NASA_FIRMS_MAP_KEY", "")
+    nasa_firms_timeout_s: float = float(os.getenv("STS_NASA_FIRMS_TIMEOUT_S", "15"))
+    nasa_firms_sensor: str = os.getenv("STS_NASA_FIRMS_SENSOR", "VIIRS_NOAA20_NRT")
+    acled_api_key: str = os.getenv("STS_ACLED_API_KEY", "")
+    acled_email: str = os.getenv("STS_ACLED_EMAIL", "")
+    acled_timeout_s: float = float(os.getenv("STS_ACLED_TIMEOUT_S", "15"))
+    acled_lookback_days: int = int(os.getenv("STS_ACLED_LOOKBACK_DAYS", "7"))
+    nws_severity_filter: str = os.getenv("STS_NWS_SEVERITY_FILTER", "Extreme,Severe")
+    nws_timeout_s: float = float(os.getenv("STS_NWS_TIMEOUT_S", "10"))
+    fema_timeout_s: float = float(os.getenv("STS_FEMA_TIMEOUT_S", "10"))
+    fema_lookback_days: int = int(os.getenv("STS_FEMA_LOOKBACK_DAYS", "30"))
+    reliefweb_timeout_s: float = float(os.getenv("STS_RELIEFWEB_TIMEOUT_S", "15"))
+    opensky_timeout_s: float = float(os.getenv("STS_OPENSKY_TIMEOUT_S", "15"))
+    # --- Webcam / Camera monitoring ---
+    windy_api_key: str = os.getenv("STS_WINDY_API_KEY", "")
+    webcam_timeout_s: float = float(os.getenv("STS_WEBCAM_TIMEOUT_S", "10"))
+    webcam_default_regions: str = os.getenv("STS_WEBCAM_DEFAULT_REGIONS", "")
 
 
 settings = Settings()
