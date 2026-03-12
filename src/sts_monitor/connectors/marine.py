@@ -146,7 +146,10 @@ class MarineTrafficConnector:
             lon = vessel.get("lon", vessel.get("longitude"))
             speed = vessel.get("speed", vessel.get("sog"))
             course = vessel.get("course", vessel.get("cog"))
-            ship_type = int(vessel.get("ship_type", vessel.get("type", 0)) or 0)
+            try:
+                ship_type = int(vessel.get("ship_type", vessel.get("type", 0)) or 0)
+            except (ValueError, TypeError):
+                ship_type = 0
             flag = str(vessel.get("flag", vessel.get("country", "")))
             destination = str(vessel.get("destination", ""))
 

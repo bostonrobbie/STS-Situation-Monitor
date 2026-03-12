@@ -163,9 +163,12 @@ class ResearchAgent:
         self._lock = threading.Lock()
 
     def get_session(self, session_id: str) -> ResearchSession | None:
-        return self._sessions.get(session_id)
+        with self._lock:
+            return self._sessions.get(session_id)
 
     def list_sessions(self) -> list[dict[str, Any]]:
+        with self._lock:
+            sessions = list(self._sessions.values())
         return [
             {
                 "session_id": s.session_id,
@@ -175,13 +178,14 @@ class ResearchAgent:
                 "iterations_completed": len(s.iterations),
                 "total_observations": len(s.all_observations),
             }
-            for s in self._sessions.values()
+            for s in sessions
         ]
 
     def stop_session(self, session_id: str) -> bool:
-        if session_id in self._stop_flags:
-            self._stop_flags[session_id] = True
-            return True
+        with self._lock:
+            if session_id in self._stop_flags:
+                self._stop_flags[session_id] = True
+                return True
         return False
 
     def _collect_initial(self, topic: str, query: str) -> tuple[list[Observation], list[str]]:
@@ -327,12 +331,12 @@ class ResearchAgent:
         )
 
         try:
-            raw = self.llm.summarize(prompt)
+            raw = self.llm.summarize(prompt) or ""
             # Try to parse JSON from the response
             # Strip markdown fences if present
             cleaned = raw.strip()
-            if cleaned.startswith("```"):
-                cleaned = cleaned.split("\n", 1)[-1]
+            if cleaned.startswith("```") and "\n" in cleaned:
+                cleaned = cleaned.split("\n", 1)[1]
             if cleaned.endswith("```"):
                 cleaned = cleaned.rsplit("```", 1)[0]
             cleaned = cleaned.strip()
@@ -394,8 +398,9 @@ class ResearchAgent:
             status="running",
             started_at=datetime.now(UTC),
         )
-        self._sessions[session_id] = session
-        self._stop_flags[session_id] = False
+        with self._lock:
+            self._sessions[session_id] = session
+            self._stop_flags[session_id] = False
 
         try:
             for iteration in range(1, self.max_iterations + 1):
@@ -504,7 +509,8 @@ class ResearchAgent:
             logger.error("Research agent error: %s", exc)
 
         session.finished_at = datetime.now(UTC)
-        self._stop_flags.pop(session_id, None)
+        with self._lock:
+            self._stop_flags.pop(session_id, None)
         return session
 
     def run_async(self, session_id: str, topic: str, seed_query: str | None = None) -> str:
@@ -522,7 +528,8 @@ class ResearchAgent:
             status="running",
             started_at=datetime.now(UTC),
         )
-        self._sessions[session_id] = session
-        self._stop_flags[session_id] = False
+        with self._lock:
+            self._sessions[session_id] = session
+            self._stop_flags[session_id] = False
         thread.start()
         return session_id

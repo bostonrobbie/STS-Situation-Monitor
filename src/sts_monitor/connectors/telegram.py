@@ -199,8 +199,10 @@ class TelegramConnector:
         try:
             with self._build_client() as client:
                 for channel in self.channels:
-                    handle = channel.get("handle", "")
-                    label = channel.get("label", handle)
+                    handle = channel.get("handle", "").strip()
+                    if not handle:
+                        continue
+                    label = channel.get("name", channel.get("label", handle))
                     try:
                         obs = self._scrape_channel(client, handle, label, query)
                         all_observations.extend(obs)

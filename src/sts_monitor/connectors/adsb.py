@@ -264,12 +264,11 @@ class ADSBExchangeConnector:
                 claim += f" {speed_str}"
             claim += mil_tag + emerg_tag
 
-            reliability = 0.90
             if is_emergency:
                 reliability = 0.95
             elif is_mil:
                 reliability = 0.88
-            elif not is_mil:
+            else:
                 reliability = 0.70
 
             observations.append(Observation(

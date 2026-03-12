@@ -184,14 +184,10 @@ def resolve_doh(hostname: str, resolver: str = "cloudflare") -> list[str]:
 def check_tor_status(socks_url: str = "socks5://127.0.0.1:9050") -> dict[str, Any]:
     """Check if Tor is running and working by querying the Tor check API."""
     try:
-        client = httpx.Client(
-            proxy=socks_url,
-            timeout=10.0,
-        )
-        resp = client.get("https://check.torproject.org/api/ip")
-        resp.raise_for_status()
-        data = resp.json()
-        client.close()
+        with httpx.Client(proxy=socks_url, timeout=10.0) as client:
+            resp = client.get("https://check.torproject.org/api/ip")
+            resp.raise_for_status()
+            data = resp.json()
         return {
             "tor_available": True,
             "is_tor": data.get("IsTor", False),
