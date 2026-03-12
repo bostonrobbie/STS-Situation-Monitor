@@ -1527,6 +1527,28 @@ def detect_convergence_zones(
             payload={"zones_detected": len(zones), "radius_km": radius_km},
         ))
 
+        # Auto-trigger alerts for high-severity convergence zones
+        for zone in zones:
+            if zone.severity in ("high", "critical"):
+                alert_event = AlertEventORM(
+                    rule_id=None,
+                    investigation_id=None,
+                    triggered_at=datetime.now(UTC),
+                    severity=zone.severity,
+                    message=(
+                        f"Convergence zone detected: {zone.signal_count} signals from "
+                        f"{len(zone.signal_types)} types at ({zone.center_lat:.3f}, {zone.center_lon:.3f})"
+                    ),
+                    detail_json=json.dumps({
+                        "zone_center": [zone.center_lat, zone.center_lon],
+                        "signal_count": zone.signal_count,
+                        "signal_types": zone.signal_types,
+                        "radius_km": zone.radius_km,
+                    }),
+                )
+                session.add(alert_event)
+        session.commit()
+
     return {
         "geo_events_analyzed": len(points),
         "zones": [
@@ -1708,6 +1730,7 @@ def ingest_reliefweb(
         country=payload.country,
         disaster_type=payload.disaster_type,
         content_format=payload.content_format,
+        timeout_s=settings.reliefweb_timeout_s,
     )
     return _ingest_with_geo_connector(
         session, investigation_id, "reliefweb", connector, payload.query, auth,
@@ -1727,7 +1750,7 @@ def ingest_opensky(
     bbox = None
     if all(v is not None for v in [payload.bbox_lamin, payload.bbox_lomin, payload.bbox_lamax, payload.bbox_lomax]):
         bbox = (payload.bbox_lamin, payload.bbox_lomin, payload.bbox_lamax, payload.bbox_lomax)
-    connector = OpenSkyConnector(bbox=bbox)
+    connector = OpenSkyConnector(bbox=bbox, timeout_s=settings.opensky_timeout_s)
     return _ingest_with_geo_connector(
         session, investigation_id, "opensky", connector, payload.query, auth,
     )

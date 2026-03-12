@@ -9,7 +9,7 @@ from sqlalchemy import and_, desc, select
 from sqlalchemy.orm import Session
 
 from sts_monitor.llm import LocalLLMClient
-from sts_monitor.models import IngestionRunORM, InvestigationORM, JobORM, JobScheduleORM, ObservationORM, ReportORM
+from sts_monitor.models import CollectionPlanORM, IngestionRunORM, InvestigationORM, JobORM, JobScheduleORM, ObservationORM, ReportORM
 from sts_monitor.pipeline import Observation, SignalPipeline
 from sts_monitor.simulation import generate_simulated_observations
 
@@ -227,6 +227,68 @@ def _execute_job(session: Session, job: JobORM, pipeline: SignalPipeline, llm_cl
             "confidence": pipeline_result.confidence,
             "llm_fallback_used": llm_fallback_used,
         }
+
+    if job.job_type == "execute_collection_plan":
+        plan_id = payload["plan_id"]
+        plan = session.get(CollectionPlanORM, plan_id)
+        if not plan:
+            raise ValueError(f"Collection plan {plan_id} not found")
+        if not plan.active:
+            raise ValueError(f"Collection plan {plan_id} is not active")
+
+        connectors_list = json.loads(plan.connectors_json)
+        total_ingested = 0
+
+        # Lazy imports to avoid circular dependency
+        from sts_monitor.connectors import (
+            GDELTConnector, USGSEarthquakeConnector, NASAFIRMSConnector,
+            ACLEDConnector, NWSAlertConnector, FEMADisasterConnector,
+            ReliefWebConnector, OpenSkyConnector, WebcamConnector,
+        )
+        from sts_monitor.config import settings as _settings
+
+        connector_map: dict[str, Any] = {
+            "gdelt": lambda: GDELTConnector(),
+            "usgs": lambda: USGSEarthquakeConnector(),
+            "nasa_firms": lambda: NASAFIRMSConnector(map_key=_settings.nasa_firms_map_key or None),
+            "acled": lambda: ACLEDConnector(api_key=_settings.acled_api_key or None, email=_settings.acled_email or None),
+            "nws": lambda: NWSAlertConnector(),
+            "fema": lambda: FEMADisasterConnector(),
+            "reliefweb": lambda: ReliefWebConnector(),
+            "opensky": lambda: OpenSkyConnector(),
+            "webcams": lambda: WebcamConnector(windy_api_key=_settings.windy_api_key or None),
+        }
+
+        for connector_name in connectors_list:
+            factory = connector_map.get(connector_name)
+            if not factory:
+                continue
+            try:
+                connector_obj = factory()
+                result = connector_obj.collect(query=plan.query)
+                for obs in result.observations:
+                    session.add(ObservationORM(
+                        investigation_id=plan.investigation_id,
+                        source=obs.source,
+                        claim=obs.claim,
+                        url=obs.url,
+                        captured_at=obs.captured_at,
+                        reliability_hint=obs.reliability_hint,
+                        connector_type=connector_name,
+                    ))
+                total_ingested += len(result.observations)
+                _record_ingestion_run(
+                    session, investigation_id=plan.investigation_id,
+                    connector=connector_name, ingested_count=len(result.observations),
+                    failed_count=0, status="success", detail={"plan_id": plan_id},
+                )
+            except Exception:
+                pass  # Individual connector failures don't fail the whole plan
+
+        plan.last_collected_at = datetime.now(UTC)
+        plan.total_collected = (plan.total_collected or 0) + total_ingested
+        session.commit()
+        return {"job_type": job.job_type, "plan_id": plan_id, "ingested_count": total_ingested}
 
     raise ValueError(f"Unsupported job type: {job.job_type}")
 
