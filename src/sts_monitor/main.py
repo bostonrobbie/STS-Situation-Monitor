@@ -26,8 +26,9 @@ from sts_monitor.discovery import build_discovery_summary
 from sts_monitor.connectors import (
     RSSConnector, RedditConnector, GDELTConnector, USGSEarthquakeConnector,
     NASAFIRMSConnector, ACLEDConnector, NWSAlertConnector, FEMADisasterConnector,
-    ReliefWebConnector, OpenSkyConnector,
+    ReliefWebConnector, OpenSkyConnector, WebcamConnector,
 )
+from sts_monitor.connectors.webcams import list_camera_regions, get_cameras_near, CURATED_CAMERAS
 from sts_monitor.database import Base, engine, get_session
 from sts_monitor.jobs import create_schedule, enqueue_job, process_job_batch, process_next_job, requeue_dead_letter, tick_schedules
 from sts_monitor.llm import LocalLLMClient
@@ -164,6 +165,14 @@ class OpenSkyIngestRequest(BaseModel):
     bbox_lomax: float | None = None
 
 
+class WebcamIngestRequest(BaseModel):
+    query: str | None = None
+    regions: list[str] | None = None
+    nearby_lat: float | None = None
+    nearby_lon: float | None = None
+    nearby_radius_km: int = Field(default=50, ge=1, le=500)
+
+
 class CollectionPlanCreateRequest(BaseModel):
     investigation_id: str
     name: str = Field(min_length=3, max_length=200)
@@ -289,17 +298,22 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="STS Situation Monitor", version="0.6.0", lifespan=lifespan)
+app = FastAPI(title="STS Situation Monitor", version="0.7.0", lifespan=lifespan)
 
-cors_origins = parse_csv_env(settings.cors_origins)
-if cors_origins:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+# Serve static dashboard
+from fastapi.staticfiles import StaticFiles
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
+cors_origins = parse_csv_env(settings.cors_origins) or ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 trusted_hosts = parse_csv_env(settings.trusted_hosts)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts or ["*"])
@@ -311,6 +325,13 @@ llm_client = LocalLLMClient(
     timeout_s=settings.local_llm_timeout_s,
     max_retries=settings.local_llm_max_retries,
 )
+
+
+@app.get("/")
+def root_redirect():
+    """Redirect root to dashboard."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/dashboard.html")
 
 
 def _build_report_text(topic: str, result_summary: str, confidence: float, disputed_claims: list[str]) -> str:
@@ -1169,6 +1190,38 @@ def _ingest_with_geo_connector(
 
     session.commit()
 
+    # Auto-extract entities from ingested observations
+    entity_count = 0
+    try:
+        # Re-query to get the ORM objects with IDs assigned
+        recent_obs = session.scalars(
+            select(ObservationORM)
+            .where(
+                ObservationORM.investigation_id == investigation_id,
+                ObservationORM.connector_type == connector_name,
+            )
+            .order_by(ObservationORM.captured_at.desc())
+            .limit(len(result.observations))
+        ).all()
+        for obs_orm in recent_obs:
+            entities = extract_entities(obs_orm.claim)
+            for ent in entities:
+                session.add(EntityMentionORM(
+                    observation_id=obs_orm.id,
+                    investigation_id=investigation_id,
+                    entity_text=ent.text,
+                    entity_type=ent.entity_type,
+                    normalized=ent.normalized or ent.text,
+                    confidence=ent.confidence,
+                    start_pos=ent.start,
+                    end_pos=ent.end,
+                ))
+                entity_count += 1
+        if entity_count:
+            session.commit()
+    except Exception:
+        pass  # Entity extraction is best-effort, don't fail ingestion
+
     # Publish SSE event
     event_bus.publish_sync(STSEvent(
         event_type="ingestion",
@@ -1177,6 +1230,7 @@ def _ingest_with_geo_connector(
             "investigation_id": investigation_id,
             "ingested_count": len(result.observations),
             "geo_events_count": geo_count,
+            "entities_extracted": entity_count,
         },
     ))
 
@@ -1185,6 +1239,7 @@ def _ingest_with_geo_connector(
         "connector": connector_name,
         "ingested_count": len(result.observations),
         "geo_events_count": geo_count,
+        "entities_extracted": entity_count,
         "error": result.metadata.get("error"),
     }
 
@@ -1676,6 +1731,60 @@ def ingest_opensky(
     return _ingest_with_geo_connector(
         session, investigation_id, "opensky", connector, payload.query, auth,
     )
+
+
+# ── Webcam / Camera Endpoints ─────────────────────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/ingest/webcams")
+def ingest_webcams(
+    investigation_id: str,
+    payload: WebcamIngestRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    connector = WebcamConnector(
+        windy_api_key=settings.windy_api_key or None,
+        regions=payload.regions,
+        nearby_lat=payload.nearby_lat,
+        nearby_lon=payload.nearby_lon,
+        nearby_radius_km=payload.nearby_radius_km,
+    )
+    return _ingest_with_geo_connector(
+        session, investigation_id, "webcams", connector, payload.query, auth,
+    )
+
+
+@app.get("/cameras/regions")
+def api_list_camera_regions(
+    _auth: AuthContext = Depends(require_api_key),
+) -> list[dict[str, Any]]:
+    """List available curated camera regions with counts."""
+    return list_camera_regions()
+
+
+@app.get("/cameras/nearby")
+def api_get_cameras_nearby(
+    lat: float,
+    lon: float,
+    radius_km: float = 100,
+    _auth: AuthContext = Depends(require_api_key),
+) -> list[dict[str, Any]]:
+    """Find curated cameras near a coordinate."""
+    return get_cameras_near(lat, lon, radius_km)
+
+
+@app.get("/cameras/all")
+def api_get_all_cameras(
+    region: str | None = None,
+    _auth: AuthContext = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Get all curated cameras, optionally filtered by region."""
+    if region:
+        cameras = CURATED_CAMERAS.get(region, [])
+        return {"region": region, "cameras": cameras, "count": len(cameras)}
+    total = sum(len(c) for c in CURATED_CAMERAS.values())
+    return {"regions": list(CURATED_CAMERAS.keys()), "cameras": CURATED_CAMERAS, "total": total}
 
 
 # ── Entity Extraction Endpoint ─────────────────────────────────────────
@@ -2172,6 +2281,63 @@ def list_collection_plans(
         }
         for r in rows
     ]
+
+
+@app.post("/collection-plans/{plan_id}/execute")
+def execute_collection_plan(
+    plan_id: int,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Execute a collection plan — runs all configured connectors for the plan's query."""
+    plan = session.get(CollectionPlanORM, plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Collection plan not found")
+    if not plan.active:
+        raise HTTPException(status_code=400, detail="Collection plan is not active")
+
+    connectors_list = json.loads(plan.connectors_json)
+    results: dict[str, Any] = {}
+    total_ingested = 0
+
+    connector_map: dict[str, Any] = {
+        "gdelt": lambda: GDELTConnector(),
+        "usgs": lambda: USGSEarthquakeConnector(),
+        "nasa_firms": lambda: NASAFIRMSConnector(map_key=settings.nasa_firms_map_key or None),
+        "acled": lambda: ACLEDConnector(api_key=settings.acled_api_key or None, email=settings.acled_email or None),
+        "nws": lambda: NWSAlertConnector(),
+        "fema": lambda: FEMADisasterConnector(),
+        "reliefweb": lambda: ReliefWebConnector(),
+        "opensky": lambda: OpenSkyConnector(),
+        "webcams": lambda: WebcamConnector(windy_api_key=settings.windy_api_key or None),
+    }
+
+    for connector_name in connectors_list:
+        factory = connector_map.get(connector_name)
+        if not factory:
+            results[connector_name] = {"error": f"Unknown connector: {connector_name}"}
+            continue
+        try:
+            connector_obj = factory()
+            result = _ingest_with_geo_connector(
+                session, plan.investigation_id, connector_name, connector_obj, plan.query, auth,
+            )
+            results[connector_name] = result
+            total_ingested += result.get("ingested_count", 0)
+        except Exception as exc:
+            results[connector_name] = {"error": str(exc)}
+
+    # Update plan stats
+    plan.last_collected_at = datetime.now(UTC)
+    plan.total_collected = (plan.total_collected or 0) + total_ingested
+    session.commit()
+
+    return {
+        "plan_id": plan_id,
+        "connectors_executed": len(connectors_list),
+        "total_ingested": total_ingested,
+        "results": results,
+    }
 
 
 # ── Curated Feed Library ──────────────────────────────────────────────
@@ -3374,5 +3540,11 @@ def dashboard_summary(_: None = Depends(require_api_key), session: Session = Dep
         "claim_evidence": claim_evidence_count,
         "api_keys": api_keys_count,
         "audit_logs": audit_logs_count,
+        "geo_events": session.scalar(select(func.count(GeoEventORM.id))) or 0,
+        "convergence_zones": session.scalar(select(func.count(ConvergenceZoneORM.id)).where(ConvergenceZoneORM.resolved_at.is_(None))) or 0,
+        "entities": session.scalar(select(func.count(EntityMentionORM.id))) or 0,
+        "stories": session.scalar(select(func.count(StoryORM.id))) or 0,
+        "discovered_topics": session.scalar(select(func.count(DiscoveredTopicORM.id)).where(DiscoveredTopicORM.status == "new")) or 0,
+        "collection_plans": session.scalar(select(func.count(CollectionPlanORM.id)).where(CollectionPlanORM.active.is_(True))) or 0,
         "latest_reports": latest_reports,
     }

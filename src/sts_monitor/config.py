@@ -47,6 +47,10 @@ class Settings:
     nws_timeout_s: float = float(os.getenv("STS_NWS_TIMEOUT_S", "10"))
     fema_timeout_s: float = float(os.getenv("STS_FEMA_TIMEOUT_S", "10"))
     fema_lookback_days: int = int(os.getenv("STS_FEMA_LOOKBACK_DAYS", "30"))
+    # --- Webcam / Camera monitoring ---
+    windy_api_key: str = os.getenv("STS_WINDY_API_KEY", "")
+    webcam_timeout_s: float = float(os.getenv("STS_WEBCAM_TIMEOUT_S", "10"))
+    webcam_default_regions: str = os.getenv("STS_WEBCAM_DEFAULT_REGIONS", "")
 
 
 settings = Settings()

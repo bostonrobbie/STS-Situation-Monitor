@@ -9,6 +9,7 @@ from sts_monitor.connectors.nws import NWSAlertConnector
 from sts_monitor.connectors.fema import FEMADisasterConnector
 from sts_monitor.connectors.reliefweb import ReliefWebConnector
 from sts_monitor.connectors.opensky import OpenSkyConnector
+from sts_monitor.connectors.webcams import WebcamConnector
 
 __all__ = [
     "Connector",
@@ -23,4 +24,5 @@ __all__ = [
     "FEMADisasterConnector",
     "ReliefWebConnector",
     "OpenSkyConnector",
+    "WebcamConnector",
 ]
