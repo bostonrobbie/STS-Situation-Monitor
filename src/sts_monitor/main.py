@@ -27,7 +27,10 @@ from sts_monitor.connectors import (
     RSSConnector, RedditConnector, GDELTConnector, USGSEarthquakeConnector,
     NASAFIRMSConnector, ACLEDConnector, NWSAlertConnector, FEMADisasterConnector,
     ReliefWebConnector, OpenSkyConnector, WebcamConnector,
+    ADSBExchangeConnector, MarineTrafficConnector, TelegramConnector,
+    InternetArchiveConnector,
 )
+from sts_monitor.privacy import PrivacyConfig, get_privacy_status
 from sts_monitor.connectors.webcams import list_camera_regions, get_cameras_near, CURATED_CAMERAS
 from sts_monitor.database import Base, engine, get_session
 from sts_monitor.jobs import create_schedule, enqueue_job, process_job_batch, process_next_job, requeue_dead_letter, tick_schedules
@@ -176,6 +179,35 @@ class WebcamIngestRequest(BaseModel):
     nearby_lat: float | None = None
     nearby_lon: float | None = None
     nearby_radius_km: int = Field(default=50, ge=1, le=500)
+
+
+class ADSBIngestRequest(BaseModel):
+    query: str | None = None
+    lat: float = Field(default=0.0, ge=-90.0, le=90.0)
+    lon: float = Field(default=0.0, ge=-180.0, le=180.0)
+    dist_nm: int = Field(default=250, ge=10, le=500)
+    military_only: bool = False
+
+
+class MarineIngestRequest(BaseModel):
+    query: str | None = None
+    bbox_lat_min: float = Field(default=-90.0, ge=-90.0, le=90.0)
+    bbox_lat_max: float = Field(default=90.0, ge=-90.0, le=90.0)
+    bbox_lon_min: float = Field(default=-180.0, ge=-180.0, le=180.0)
+    bbox_lon_max: float = Field(default=180.0, ge=-180.0, le=180.0)
+    vessel_types: list[str] | None = None
+
+
+class TelegramIngestRequest(BaseModel):
+    query: str | None = None
+    channels: list[str] | None = None
+    max_posts_per_channel: int = Field(default=20, ge=1, le=100)
+
+
+class ArchiveIngestRequest(BaseModel):
+    query: str | None = None
+    urls: list[str] = Field(min_length=1, max_length=20)
+    max_snapshots: int = Field(default=5, ge=1, le=20)
 
 
 class CollectionPlanCreateRequest(BaseModel):
@@ -2380,10 +2412,10 @@ def dashboard_live(
         select(func.count(GeoEventORM.id)).where(GeoEventORM.event_time >= cutoff_24h)
     ) or 0
 
-    # Recent geo events
+    # Recent geo events (return up to 500 for globe rendering)
     recent_geo = session.scalars(
         select(GeoEventORM).where(GeoEventORM.event_time >= cutoff_24h)
-        .order_by(GeoEventORM.event_time.desc()).limit(20)
+        .order_by(GeoEventORM.event_time.desc()).limit(500)
     ).all()
 
     # Active convergence zones
@@ -2413,9 +2445,16 @@ def dashboard_live(
         "layers": {layer: count for layer, count in layer_counts},
         "recent_geo_events": [
             {
-                "id": r.id, "layer": r.layer, "title": r.title,
-                "latitude": r.latitude, "longitude": r.longitude,
-                "magnitude": r.magnitude, "event_time": r.event_time.isoformat(),
+                "id": r.id,
+                "layer": r.layer,
+                "title": r.title,
+                "latitude": r.latitude,
+                "longitude": r.longitude,
+                "altitude": r.altitude,
+                "magnitude": r.magnitude,
+                "source_id": r.source_id,
+                "event_time": r.event_time.isoformat(),
+                "properties": json.loads(r.properties_json) if r.properties_json else {},
             }
             for r in recent_geo
         ],
@@ -2436,6 +2475,18 @@ def dashboard_live(
             for a in recent_alerts
         ],
     }
+
+
+# ── Privacy Status Endpoint ─────────────────────────────────────────────
+
+
+@app.get("/privacy/status")
+def privacy_status(
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Return current privacy/anonymization configuration status."""
+    config = PrivacyConfig()
+    return get_privacy_status(config)
 
 
 # ── ReliefWeb Humanitarian Connector Endpoint ──────────────────────────
@@ -2532,6 +2583,100 @@ def api_get_all_cameras(
         return {"region": region, "cameras": cameras, "count": len(cameras)}
     total = sum(len(c) for c in CURATED_CAMERAS.values())
     return {"regions": list(CURATED_CAMERAS.keys()), "cameras": CURATED_CAMERAS, "total": total}
+
+
+# ── ADS-B Aircraft Connector Endpoint ──────────────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/ingest/adsb")
+def ingest_adsb(
+    investigation_id: str,
+    payload: ADSBIngestRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Ingest ADS-B aircraft tracking data (includes military flights)."""
+    connector = ADSBExchangeConnector(
+        center_lat=payload.lat,
+        center_lon=payload.lon,
+        radius_nm=payload.dist_nm,
+        military_only=payload.military_only,
+    )
+    return _ingest_with_geo_connector(
+        session, investigation_id, "adsb", connector, payload.query, auth,
+    )
+
+
+# ── Marine / AIS Vessel Connector Endpoint ─────────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/ingest/marine")
+def ingest_marine(
+    investigation_id: str,
+    payload: MarineIngestRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Ingest AIS marine vessel tracking data."""
+    connector = MarineTrafficConnector(
+        bbox=(
+            payload.bbox_lat_min,
+            payload.bbox_lon_min,
+            payload.bbox_lat_max,
+            payload.bbox_lon_max,
+        ),
+        vessel_types=payload.vessel_types,
+    )
+    return _ingest_with_geo_connector(
+        session, investigation_id, "marine", connector, payload.query, auth,
+    )
+
+
+# ── Telegram Public Channel Connector Endpoint ─────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/ingest/telegram")
+def ingest_telegram(
+    investigation_id: str,
+    payload: TelegramIngestRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Scrape public Telegram channels for OSINT intelligence."""
+    # TelegramConnector expects list[dict] with handle/name/category fields
+    channel_dicts = (
+        [{"handle": h, "name": h, "category": "custom"} for h in payload.channels]
+        if payload.channels
+        else None
+    )
+    connector = TelegramConnector(
+        channels=channel_dicts,
+        per_channel_limit=payload.max_posts_per_channel,
+    )
+    return _ingest_with_geo_connector(
+        session, investigation_id, "telegram", connector, payload.query, auth,
+    )
+
+
+# ── Internet Archive / Wayback Machine Connector Endpoint ──────────────
+
+
+@app.post("/investigations/{investigation_id}/ingest/archive")
+def ingest_archive(
+    investigation_id: str,
+    payload: ArchiveIngestRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Retrieve archived/cached versions of URLs from the Wayback Machine."""
+    connector = InternetArchiveConnector(
+        urls_to_check=payload.urls,
+        search_query=payload.query,
+        max_snapshots=payload.max_snapshots,
+    )
+    return _ingest_with_geo_connector(
+        session, investigation_id, "archive", connector, payload.query, auth,
+    )
 
 
 # ── Entity Extraction Endpoint ─────────────────────────────────────────

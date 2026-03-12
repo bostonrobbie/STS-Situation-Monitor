@@ -13,6 +13,10 @@ from sts_monitor.connectors.webcams import WebcamConnector
 from sts_monitor.connectors.nitter import NitterConnector
 from sts_monitor.connectors.web_scraper import WebScraperConnector
 from sts_monitor.connectors.search import SearchConnector
+from sts_monitor.connectors.adsb import ADSBExchangeConnector
+from sts_monitor.connectors.marine import MarineTrafficConnector
+from sts_monitor.connectors.telegram import TelegramConnector
+from sts_monitor.connectors.archive import InternetArchiveConnector
 
 __all__ = [
     "Connector",
@@ -31,4 +35,8 @@ __all__ = [
     "NitterConnector",
     "WebScraperConnector",
     "SearchConnector",
+    "ADSBExchangeConnector",
+    "MarineTrafficConnector",
+    "TelegramConnector",
+    "InternetArchiveConnector",
 ]

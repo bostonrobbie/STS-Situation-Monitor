@@ -29,6 +29,8 @@ from sts_monitor.connectors.search import SearchConnector
 from sts_monitor.connectors.web_scraper import WebScraperConnector
 from sts_monitor.connectors.rss import RSSConnector
 from sts_monitor.collection_plan import get_curated_feeds
+from sts_monitor.corroboration import analyze_corroboration
+from sts_monitor.slop_detector import filter_slop
 from sts_monitor.llm import LocalLLMClient
 from sts_monitor.pipeline import Observation, SignalPipeline
 
@@ -222,6 +224,20 @@ class ResearchAgent:
         except Exception as exc:
             logger.warning("RSS failed: %s", exc)
 
+        # 4) Telegram public channels
+        try:
+            from sts_monitor.connectors.telegram import TelegramConnector
+            telegram = TelegramConnector(
+                categories=self.nitter_categories,  # Reuse OSINT categories
+                per_channel_limit=10,
+            )
+            result = telegram.collect(query=query)
+            observations.extend(result.observations)
+            if result.observations:
+                connectors_used.append("telegram")
+        except Exception as exc:
+            logger.warning("Telegram failed: %s", exc)
+
         return observations, connectors_used
 
     def _collect_directed(
@@ -414,6 +430,30 @@ class ResearchAgent:
                 # Run through pipeline for dedup/filtering
                 pipeline_result = self.pipeline.run(new_obs, topic=topic)
                 accepted = pipeline_result.accepted
+
+                # Auto-filter slop/propaganda/engagement bait
+                if accepted:
+                    obs_dicts = [
+                        {"id": i, "source": o.source, "claim": o.claim,
+                         "url": o.url, "captured_at": o.captured_at,
+                         "reliability_hint": o.reliability_hint}
+                        for i, o in enumerate(accepted)
+                    ]
+                    slop_result = filter_slop(obs_dicts, drop_threshold=0.6)
+                    # Remove observations flagged as slop/propaganda
+                    drop_ids = {
+                        s.observation_id for s in slop_result.scores
+                        if s.recommended_action == "drop"
+                    }
+                    if drop_ids:
+                        accepted = [
+                            o for i, o in enumerate(accepted)
+                            if i not in drop_ids
+                        ]
+                        logger.info(
+                            "Slop filter dropped %d/%d observations",
+                            len(drop_ids), len(obs_dicts),
+                        )
 
                 session.all_observations.extend(accepted)
 

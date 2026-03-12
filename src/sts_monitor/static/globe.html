@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STS Intelligence Globe</title>
+<link rel="stylesheet" href="https://unpkg.com/cesium@1.114/Build/Cesium/Widgets/widgets.css">
+<style>
+  :root {
+    --bg: #0a0e17; --bg-secondary: #131a2b; --text: #e5e7eb;
+    --text-secondary: #9ca3af; --accent: #3b82f6; --border: #1e293b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; overflow: hidden; height: 100vh; }
+
+  #cesiumContainer { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+
+  /* Control panel overlay */
+  .controls {
+    position: absolute; top: 12px; left: 12px; z-index: 1000;
+    background: rgba(10,14,23,0.92); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px; width: 280px; max-height: 90vh;
+    overflow-y: auto; backdrop-filter: blur(8px);
+  }
+  .controls h2 { font-size: 14px; color: var(--accent); margin-bottom: 10px; }
+  .controls h3 { font-size: 12px; color: var(--text-secondary); margin: 10px 0 6px; text-transform: uppercase; letter-spacing: 1px; }
+
+  .layer-toggle { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; font-size: 12px; }
+  .layer-toggle input { accent-color: var(--accent); }
+  .layer-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .layer-count { margin-left: auto; color: var(--text-secondary); font-size: 10px; }
+
+  .stat-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 11px; }
+  .stat-val { color: var(--accent); font-weight: 600; }
+
+  /* Info panel (right side) */
+  .info-panel {
+    position: absolute; top: 12px; right: 12px; z-index: 1000;
+    background: rgba(10,14,23,0.92); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px; width: 320px; max-height: 70vh;
+    overflow-y: auto; backdrop-filter: blur(8px); display: none;
+  }
+  .info-panel h3 { font-size: 13px; color: var(--accent); margin-bottom: 8px; }
+  .info-panel .close-btn {
+    position: absolute; top: 8px; right: 12px; cursor: pointer;
+    color: var(--text-secondary); font-size: 16px;
+  }
+  .event-card {
+    background: var(--bg-secondary); border-radius: 6px; padding: 8px;
+    margin-bottom: 6px; font-size: 11px; border-left: 3px solid var(--accent);
+  }
+  .event-card .source { color: var(--text-secondary); font-size: 10px; }
+  .event-card .time { color: var(--text-secondary); font-size: 10px; float: right; }
+
+  /* Status bar */
+  .status-bar {
+    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+    z-index: 1000; background: rgba(10,14,23,0.9); border: 1px solid var(--border);
+    border-radius: 20px; padding: 6px 16px; display: flex; gap: 16px;
+    font-size: 11px; backdrop-filter: blur(8px);
+  }
+  .status-item { display: flex; align-items: center; gap: 4px; }
+  .pulse { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  /* Layer filter buttons */
+  .quick-filters { display: flex; gap: 4px; flex-wrap: wrap; margin: 8px 0; }
+  .filter-btn {
+    padding: 3px 8px; border-radius: 12px; font-size: 10px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text);
+    transition: all 0.2s;
+  }
+  .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .filter-btn:hover { border-color: var(--accent); }
+
+  /* Cesium overrides */
+  .cesium-viewer-bottom { display: none !important; }
+  .cesium-viewer-toolbar { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="cesiumContainer"></div>
+
+<!-- Control Panel -->
+<div class="controls">
+  <h2>STS Intelligence Globe</h2>
+
+  <div class="quick-filters">
+    <div class="filter-btn active" onclick="toggleAllLayers(true)">All</div>
+    <div class="filter-btn" onclick="filterMilitary()">Military</div>
+    <div class="filter-btn" onclick="filterConflict()">Conflict</div>
+    <div class="filter-btn" onclick="filterNatural()">Natural</div>
+  </div>
+
+  <h3>Data Layers</h3>
+  <div id="layer-toggles"></div>
+
+  <h3>Statistics</h3>
+  <div id="globe-stats">
+    <div class="stat-row"><span>Total Events</span><span class="stat-val" id="stat-total">0</span></div>
+    <div class="stat-row"><span>Aircraft Tracked</span><span class="stat-val" id="stat-aircraft">0</span></div>
+    <div class="stat-row"><span>Vessels Tracked</span><span class="stat-val" id="stat-vessels">0</span></div>
+    <div class="stat-row"><span>Active Zones</span><span class="stat-val" id="stat-zones">0</span></div>
+    <div class="stat-row"><span>Sources</span><span class="stat-val" id="stat-sources">0</span></div>
+  </div>
+
+  <h3>Privacy</h3>
+  <div id="privacy-status" style="font-size:11px;color:var(--text-secondary)">
+    Checking...
+  </div>
+
+  <div style="margin-top:12px;font-size:10px;color:var(--text-secondary)">
+    Auto-refresh: <select id="refresh-interval" style="background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:2px;font-size:10px">
+      <option value="30">30s</option>
+      <option value="60" selected>60s</option>
+      <option value="300">5m</option>
+      <option value="0">Off</option>
+    </select>
+  </div>
+</div>
+
+<!-- Info Panel (shows on click) -->
+<div class="info-panel" id="info-panel">
+  <span class="close-btn" onclick="closeInfoPanel()">&times;</span>
+  <h3 id="info-title">Region Details</h3>
+  <div id="info-coords" style="font-size:10px;color:var(--text-secondary);margin-bottom:8px"></div>
+  <div id="info-events"></div>
+</div>
+
+<!-- Status Bar -->
+<div class="status-bar">
+  <div class="status-item"><div class="pulse"></div> Live</div>
+  <div class="status-item">Events: <span id="bar-events">0</span></div>
+  <div class="status-item">Aircraft: <span id="bar-aircraft">0</span></div>
+  <div class="status-item">Vessels: <span id="bar-vessels">0</span></div>
+  <div class="status-item" id="bar-time"></div>
+</div>
+
+<script src="https://unpkg.com/cesium@1.114/Build/Cesium/Cesium.js"></script>
+<script>
+// Disable Cesium Ion (we use free imagery)
+Cesium.Ion.defaultAccessToken = undefined;
+
+const API_BASE = window.location.origin;
+const API_KEY = new URLSearchParams(window.location.search).get('key') || 'change-me';
+const HEADERS = { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' };
+
+const LAYER_COLORS = {
+  earthquake: Cesium.Color.fromCssColorString('#ef4444'),
+  fire: Cesium.Color.fromCssColorString('#f59e0b'),
+  conflict: Cesium.Color.fromCssColorString('#a855f7'),
+  weather_alert: Cesium.Color.fromCssColorString('#06b6d4'),
+  disaster: Cesium.Color.fromCssColorString('#3b82f6'),
+  humanitarian: Cesium.Color.fromCssColorString('#22c55e'),
+  aircraft: Cesium.Color.fromCssColorString('#ff6b6b'),
+  maritime: Cesium.Color.fromCssColorString('#4ecdc4'),
+  unknown: Cesium.Color.fromCssColorString('#9ca3af'),
+};
+
+const LAYER_CSS = {
+  earthquake: '#ef4444', fire: '#f59e0b', conflict: '#a855f7',
+  weather_alert: '#06b6d4', disaster: '#3b82f6', humanitarian: '#22c55e',
+  aircraft: '#ff6b6b', maritime: '#4ecdc4', unknown: '#9ca3af',
+};
+
+let viewer;
+let activeLayers = new Set(Object.keys(LAYER_COLORS));
+let allEntities = [];
+let refreshTimer = null;
+let layerCounts = {};
+
+// ── Cesium Setup ──────────────────────────────────────────────────────
+
+function initGlobe() {
+  viewer = new Cesium.Viewer('cesiumContainer', {
+    imageryProvider: new Cesium.UrlTemplateImageryProvider({
+      url: 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+      credit: 'CartoDB',
+    }),
+    baseLayerPicker: false,
+    geocoder: false,
+    homeButton: false,
+    sceneModePicker: false,
+    selectionIndicator: true,
+    timeline: false,
+    animation: false,
+    fullscreenButton: false,
+    vrButton: false,
+    navigationHelpButton: false,
+    infoBox: false,
+    creditContainer: document.createElement('div'), // Hide credits
+    skyBox: false,
+    skyAtmosphere: new Cesium.SkyAtmosphere(),
+    requestRenderMode: false,
+  });
+
+  // Dark globe atmosphere
+  viewer.scene.globe.enableLighting = false;
+  viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#0a0e17');
+  viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#0d1117');
+
+  // Click handler
+  const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+  handler.setInputAction(function(click) {
+    const picked = viewer.scene.pick(click.position);
+    if (Cesium.defined(picked) && picked.id) {
+      showEntityInfo(picked.id);
+    } else {
+      // Click on globe - show nearby events
+      const cartesian = viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid);
+      if (cartesian) {
+        const carto = Cesium.Cartographic.fromCartesian(cartesian);
+        const lat = Cesium.Math.toDegrees(carto.latitude);
+        const lon = Cesium.Math.toDegrees(carto.longitude);
+        showRegionInfo(lat, lon);
+      }
+    }
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+  // Initial camera position
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(30, 20, 20000000),
+    duration: 0,
+  });
+
+  renderLayerToggles();
+}
+
+// ── Data Loading ──────────────────────────────────────────────────────
+
+async function loadGlobeData() {
+  try {
+    const resp = await fetch(`${API_BASE}/dashboard/live`, { headers: HEADERS });
+    const data = await resp.json();
+    updateGlobe(data);
+  } catch(e) { console.warn('Failed to load globe data:', e); }
+
+  updateStatusBar();
+}
+
+function updateGlobe(data) {
+  viewer.entities.removeAll();
+  allEntities = [];
+  layerCounts = {};
+
+  const events = data.geo_events || [];
+  const zones = data.convergence_zones || [];
+
+  // Add geo events as entities
+  for (const evt of events) {
+    const layer = evt.layer || 'unknown';
+    if (!activeLayers.has(layer)) continue;
+
+    layerCounts[layer] = (layerCounts[layer] || 0) + 1;
+    const color = LAYER_COLORS[layer] || LAYER_COLORS.unknown;
+    const size = layer === 'aircraft' ? 6 : layer === 'maritime' ? 7 : 10;
+
+    const entity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(evt.longitude, evt.latitude, (evt.altitude || 0) * (layer === 'aircraft' ? 1 : 0)),
+      point: {
+        pixelSize: size,
+        color: color,
+        outlineColor: Cesium.Color.WHITE.withAlpha(0.3),
+        outlineWidth: 1,
+        heightReference: layer === 'aircraft' ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: viewer.camera.positionCartographic.height < 5000000 ? {
+        text: (evt.title || '').substring(0, 30),
+        font: '10px monospace',
+        fillColor: Cesium.Color.WHITE,
+        style: Cesium.LabelStyle.FILL,
+        outlineWidth: 2,
+        outlineColor: Cesium.Color.BLACK,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -12),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        show: false,
+      } : undefined,
+      properties: {
+        layer: layer,
+        title: evt.title || 'Unknown event',
+        time: evt.event_time || '',
+        magnitude: evt.magnitude,
+        source_id: evt.source_id || '',
+        details: evt.properties || {},
+      },
+    });
+    allEntities.push({ entity, data: evt });
+  }
+
+  // Add convergence zones as translucent circles
+  for (const zone of zones) {
+    const sevColor = zone.severity === 'critical' ? '#ef4444' :
+                     zone.severity === 'high' ? '#f59e0b' :
+                     zone.severity === 'medium' ? '#06b6d4' : '#6b7280';
+
+    viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(zone.center_lon, zone.center_lat),
+      ellipse: {
+        semiMinorAxis: (zone.radius_km || 50) * 1000,
+        semiMajorAxis: (zone.radius_km || 50) * 1000,
+        material: Cesium.Color.fromCssColorString(sevColor).withAlpha(0.15),
+        outline: true,
+        outlineColor: Cesium.Color.fromCssColorString(sevColor).withAlpha(0.5),
+        outlineWidth: 2,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+      properties: {
+        type: 'convergence_zone',
+        severity: zone.severity,
+        signal_types: (zone.signal_types || []).join(', '),
+        signal_count: zone.signal_count,
+      },
+    });
+  }
+
+  // Update stats
+  document.getElementById('stat-total').textContent = events.length;
+  document.getElementById('stat-aircraft').textContent = layerCounts.aircraft || 0;
+  document.getElementById('stat-vessels').textContent = layerCounts.maritime || 0;
+  document.getElementById('stat-zones').textContent = zones.length;
+
+  const sources = new Set(events.map(e => (e.source_id || '').split('_')[0]));
+  document.getElementById('stat-sources').textContent = sources.size;
+
+  renderLayerToggles();
+}
+
+// ── Layer Controls ────────────────────────────────────────────────────
+
+function renderLayerToggles() {
+  const container = document.getElementById('layer-toggles');
+  container.innerHTML = '';
+  for (const [layer, cssColor] of Object.entries(LAYER_CSS)) {
+    const count = layerCounts[layer] || 0;
+    const checked = activeLayers.has(layer) ? 'checked' : '';
+    container.innerHTML += `
+      <label class="layer-toggle">
+        <input type="checkbox" ${checked} onchange="toggleLayer('${layer}', this.checked)">
+        <div class="layer-dot" style="background:${cssColor}"></div>
+        ${layer.replace('_', ' ')}
+        <span class="layer-count">${count}</span>
+      </label>`;
+  }
+}
+
+function toggleLayer(layer, enabled) {
+  if (enabled) activeLayers.add(layer);
+  else activeLayers.delete(layer);
+  loadGlobeData();
+}
+
+function toggleAllLayers(on) {
+  if (on) activeLayers = new Set(Object.keys(LAYER_COLORS));
+  else activeLayers.clear();
+  loadGlobeData();
+}
+
+function filterMilitary() {
+  activeLayers = new Set(['aircraft', 'maritime', 'conflict']);
+  loadGlobeData();
+}
+
+function filterConflict() {
+  activeLayers = new Set(['conflict', 'disaster', 'humanitarian']);
+  loadGlobeData();
+}
+
+function filterNatural() {
+  activeLayers = new Set(['earthquake', 'fire', 'weather_alert']);
+  loadGlobeData();
+}
+
+// ── Click Info ────────────────────────────────────────────────────────
+
+function showEntityInfo(entity) {
+  const props = entity.properties;
+  if (!props) return;
+
+  const panel = document.getElementById('info-panel');
+  const title = props.title ? props.title.getValue() : 'Event';
+  document.getElementById('info-title').textContent = title.substring(0, 80);
+
+  const details = props.details ? props.details.getValue() : {};
+  const layer = props.layer ? props.layer.getValue() : '';
+  const time = props.time ? props.time.getValue() : '';
+
+  let html = `<div class="event-card" style="border-left-color:${LAYER_CSS[layer] || '#9ca3af'}">
+    <div><strong>${layer.replace('_', ' ').toUpperCase()}</strong></div>
+    <div>${title}</div>
+    <div class="time">${time ? new Date(time).toLocaleString() : ''}</div>`;
+
+  for (const [k, v] of Object.entries(details)) {
+    if (v !== null && v !== undefined && v !== '') {
+      html += `<div class="source">${k}: ${v}</div>`;
+    }
+  }
+  html += '</div>';
+
+  document.getElementById('info-events').innerHTML = html;
+  panel.style.display = 'block';
+}
+
+function showRegionInfo(lat, lon) {
+  const panel = document.getElementById('info-panel');
+  document.getElementById('info-title').textContent = 'Region Events';
+  document.getElementById('info-coords').textContent = `${lat.toFixed(2)}, ${lon.toFixed(2)}`;
+
+  // Find nearby events (within ~2 degrees)
+  const nearby = allEntities.filter(e => {
+    const d = e.data;
+    return Math.abs(d.latitude - lat) < 2 && Math.abs(d.longitude - lon) < 2;
+  }).slice(0, 20);
+
+  if (nearby.length === 0) {
+    document.getElementById('info-events').innerHTML =
+      '<div style="color:var(--text-secondary);font-size:11px;padding:8px">No events in this region</div>';
+  } else {
+    let html = `<div style="font-size:10px;color:var(--text-secondary);margin-bottom:6px">${nearby.length} events nearby</div>`;
+    for (const item of nearby) {
+      const d = item.data;
+      const color = LAYER_CSS[d.layer] || '#9ca3af';
+      html += `<div class="event-card" style="border-left-color:${color}">
+        <div style="font-size:10px;font-weight:600;color:${color}">${(d.layer || 'unknown').replace('_', ' ').toUpperCase()}</div>
+        <div>${(d.title || '').substring(0, 150)}</div>
+        <div class="time">${d.event_time ? new Date(d.event_time).toLocaleString() : ''}</div>
+      </div>`;
+    }
+    document.getElementById('info-events').innerHTML = html;
+  }
+  panel.style.display = 'block';
+}
+
+function closeInfoPanel() {
+  document.getElementById('info-panel').style.display = 'none';
+}
+
+// ── Status ────────────────────────────────────────────────────────────
+
+function updateStatusBar() {
+  document.getElementById('bar-events').textContent = document.getElementById('stat-total').textContent;
+  document.getElementById('bar-aircraft').textContent = document.getElementById('stat-aircraft').textContent;
+  document.getElementById('bar-vessels').textContent = document.getElementById('stat-vessels').textContent;
+  document.getElementById('bar-time').textContent = new Date().toLocaleTimeString();
+}
+
+async function checkPrivacy() {
+  try {
+    const resp = await fetch(`${API_BASE}/privacy/status`, { headers: HEADERS });
+    const data = await resp.json();
+    const el = document.getElementById('privacy-status');
+    const tor = data.tor_enabled ? '<span style="color:#22c55e">Tor: ON</span>' : '<span style="color:#ef4444">Tor: OFF</span>';
+    const ua = data.ua_rotation ? '<span style="color:#22c55e">UA Rotation: ON</span>' : 'UA: static';
+    const doh = data.doh_enabled ? '<span style="color:#22c55e">DoH: ON</span>' : 'DoH: OFF';
+    el.innerHTML = `${tor} | ${ua} | ${doh}`;
+  } catch(e) {
+    document.getElementById('privacy-status').textContent = 'Privacy status unavailable';
+  }
+}
+
+// ── Refresh ───────────────────────────────────────────────────────────
+
+function setupRefresh() {
+  const sel = document.getElementById('refresh-interval');
+  sel.addEventListener('change', () => {
+    if (refreshTimer) clearInterval(refreshTimer);
+    const secs = parseInt(sel.value);
+    if (secs > 0) {
+      refreshTimer = setInterval(loadGlobeData, secs * 1000);
+    }
+  });
+  // Default 60s
+  refreshTimer = setInterval(loadGlobeData, 60000);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  initGlobe();
+  loadGlobeData();
+  checkPrivacy();
+  setupRefresh();
+});
+</script>
+</body>
+</html>
