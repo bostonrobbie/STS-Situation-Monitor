@@ -184,6 +184,25 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; back
     </div>
 
     <div class="panel-section">
+      <h3>Temporal Playback</h3>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <button class="btn-sm" id="playback-btn" onclick="togglePlayback()">Play</button>
+        <span id="playback-time" style="font-size:11px;color:var(--text-secondary)">--:--</span>
+        <select id="playback-speed" style="font-size:10px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:2px">
+          <option value="500">1x</option>
+          <option value="250" selected>2x</option>
+          <option value="100">5x</option>
+          <option value="50">10x</option>
+        </select>
+      </div>
+      <input type="range" id="playback-slider" min="0" max="100" value="100" style="width:100%;accent-color:var(--accent-blue)" oninput="scrubPlayback(this.value)">
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-secondary)">
+        <span id="playback-start">-48h</span>
+        <span id="playback-end">Now</span>
+      </div>
+    </div>
+
+    <div class="panel-section">
       <h3>Discovered Topics</h3>
       <div style="margin-bottom:8px"><button class="btn-sm" onclick="runDiscovery()">Run Discovery</button></div>
       <div id="discovered-topics"></div>
@@ -613,6 +632,86 @@ function connectSSE() {
   });
 }
 
+// ── Temporal Playback ───────────────────────────────────────────────────
+
+let playbackData = null;
+let playbackPlaying = false;
+let playbackTimer = null;
+let playbackIndex = 0;
+
+async function loadPlaybackData() {
+  try {
+    playbackData = await apiFetch('/dashboard/playback?hours=48');
+    const meta = playbackData.metadata || {};
+    const bounds = meta.time_bounds || {};
+    if (bounds.min) document.getElementById('playback-start').textContent = new Date(bounds.min).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    if (bounds.max) document.getElementById('playback-end').textContent = new Date(bounds.max).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    document.getElementById('playback-slider').max = Math.max(1, (playbackData.features || []).length - 1);
+    document.getElementById('playback-slider').value = document.getElementById('playback-slider').max;
+  } catch(e) { console.warn('Playback data unavailable:', e); }
+}
+
+function renderPlaybackFrame(upToIndex) {
+  if (!playbackData || !map) return;
+  const features = playbackData.features.slice(0, upToIndex + 1);
+  const geojson = { type: 'FeatureCollection', features };
+
+  if (map.getSource('playback-source')) {
+    map.getSource('playback-source').setData(geojson);
+  } else {
+    map.addSource('playback-source', { type: 'geojson', data: geojson });
+    map.addLayer({
+      id: 'playback-layer',
+      type: 'circle',
+      source: 'playback-source',
+      paint: {
+        'circle-radius': 6,
+        'circle-color': ['match', ['get', 'layer'],
+          'earthquake', '#ef4444', 'fire', '#f59e0b', 'conflict', '#a855f7',
+          'weather', '#06b6d4', 'disaster', '#3b82f6', 'humanitarian', '#22c55e',
+          '#6b7280'],
+        'circle-opacity': 0.8,
+        'circle-stroke-width': 1,
+        'circle-stroke-color': 'rgba(255,255,255,0.3)',
+      },
+    });
+  }
+
+  // Update time display
+  if (features.length > 0) {
+    const lastTime = features[features.length - 1].properties.event_time;
+    document.getElementById('playback-time').textContent = new Date(lastTime).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  }
+}
+
+function togglePlayback() {
+  if (!playbackData) { loadPlaybackData(); return; }
+  playbackPlaying = !playbackPlaying;
+  document.getElementById('playback-btn').textContent = playbackPlaying ? 'Pause' : 'Play';
+
+  if (playbackPlaying) {
+    if (playbackIndex >= (playbackData.features || []).length - 1) playbackIndex = 0;
+    const speed = parseInt(document.getElementById('playback-speed').value) || 250;
+    playbackTimer = setInterval(() => {
+      if (playbackIndex >= (playbackData.features || []).length - 1) {
+        togglePlayback(); // Stop at end
+        return;
+      }
+      playbackIndex++;
+      document.getElementById('playback-slider').value = playbackIndex;
+      renderPlaybackFrame(playbackIndex);
+    }, speed);
+  } else {
+    clearInterval(playbackTimer);
+    playbackTimer = null;
+  }
+}
+
+function scrubPlayback(value) {
+  playbackIndex = parseInt(value);
+  if (playbackData) renderPlaybackFrame(playbackIndex);
+}
+
 // ── Init ───────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -624,6 +723,8 @@ document.addEventListener('DOMContentLoaded', () => {
   renderConnectorStatus();
   loadEntityCount();
   loadStoryCount();
+
+  loadPlaybackData();
 
   // Try SSE
   try { connectSSE(); } catch(e) { console.warn('SSE unavailable:', e); }

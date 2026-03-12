@@ -70,6 +70,11 @@ class Settings:
     agent_max_observations: int = int(os.getenv("STS_AGENT_MAX_OBSERVATIONS", "500"))
     agent_inter_iteration_delay_s: float = float(os.getenv("STS_AGENT_INTER_ITERATION_DELAY_S", "5"))
     agent_llm_timeout_s: float = float(os.getenv("STS_AGENT_LLM_TIMEOUT_S", "60"))
+    # --- Embeddings / Semantic search ---
+    embedding_model: str = os.getenv("STS_EMBEDDING_MODEL", "nomic-embed-text")
+    embedding_timeout_s: float = float(os.getenv("STS_EMBEDDING_TIMEOUT_S", "30"))
+    qdrant_timeout_s: float = float(os.getenv("STS_QDRANT_TIMEOUT_S", "15"))
+    qdrant_vector_size: int = int(os.getenv("STS_QDRANT_VECTOR_SIZE", "768"))
 
 
 settings = Settings()

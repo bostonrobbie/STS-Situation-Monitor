@@ -1354,6 +1354,393 @@ def list_twitter_categories(
     }
 
 
+# ── Semantic Search Endpoints ───────────────────────────────────────────
+
+
+def _get_semantic_engine():
+    from sts_monitor.embeddings import OllamaEmbeddingClient, QdrantStore, SemanticSearchEngine
+    embedder = OllamaEmbeddingClient(
+        base_url=settings.local_llm_url,
+        model=settings.embedding_model,
+        timeout_s=settings.embedding_timeout_s,
+    )
+    store = QdrantStore(
+        qdrant_url=settings.qdrant_url,
+        vector_size=settings.qdrant_vector_size,
+        timeout_s=settings.qdrant_timeout_s,
+    )
+    return SemanticSearchEngine(embedder, store)
+
+
+@app.post("/semantic/initialize")
+def semantic_initialize(
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Initialize semantic search (create Qdrant collection, check embedding model)."""
+    engine = _get_semantic_engine()
+    return engine.initialize()
+
+
+class SemanticIndexRequest(BaseModel):
+    investigation_id: str
+
+
+@app.post("/semantic/index")
+def semantic_index_investigation(
+    body: SemanticIndexRequest,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Index all observations for an investigation into Qdrant."""
+    investigation = session.get(InvestigationORM, body.investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    db_obs = session.scalars(
+        select(ObservationORM).where(ObservationORM.investigation_id == body.investigation_id)
+    ).all()
+
+    obs_dicts = [
+        {
+            "id": o.id,
+            "investigation_id": o.investigation_id,
+            "source": o.source,
+            "claim": o.claim,
+            "url": o.url,
+            "captured_at": str(o.captured_at),
+            "reliability_hint": o.reliability_hint,
+        }
+        for o in db_obs
+    ]
+
+    engine = _get_semantic_engine()
+    return engine.index_observations(obs_dicts)
+
+
+class SemanticSearchRequest(BaseModel):
+    query: str = Field(min_length=2, max_length=1000)
+    limit: int = Field(default=20, ge=1, le=100)
+    score_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+    investigation_id: str | None = None
+
+
+@app.post("/semantic/search")
+def semantic_search(
+    body: SemanticSearchRequest,
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Semantic similarity search across indexed observations."""
+    engine = _get_semantic_engine()
+    result = engine.search(
+        query=body.query,
+        limit=body.limit,
+        score_threshold=body.score_threshold,
+        investigation_id=body.investigation_id,
+    )
+    return {
+        "query": result.query,
+        "total_indexed": result.total_indexed,
+        "search_latency_ms": result.search_latency_ms,
+        "match_count": len(result.matches),
+        "matches": [
+            {
+                "observation_id": m.observation_id,
+                "investigation_id": m.investigation_id,
+                "source": m.source,
+                "claim": m.claim[:500],
+                "url": m.url,
+                "score": m.score,
+                "captured_at": m.captured_at,
+            }
+            for m in result.matches
+        ],
+    }
+
+
+@app.get("/semantic/health")
+def semantic_health(
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Check health of embedding model and Qdrant."""
+    engine = _get_semantic_engine()
+    return {
+        "embedding": engine.embedder.health(),
+        "qdrant": engine.store.health(),
+    }
+
+
+# ── Auto Report Generation Endpoints ───────────────────────────────────
+
+
+class GenerateReportRequest(BaseModel):
+    investigation_id: str
+    use_llm: bool = True
+
+
+@app.post("/reports/generate")
+def generate_intelligence_report(
+    body: GenerateReportRequest,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Generate a full structured intelligence report for an investigation."""
+    from sts_monitor.report_generator import ReportGenerator
+    from sts_monitor.entities import extract_entities
+
+    investigation = session.get(InvestigationORM, body.investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    # Gather observations
+    db_obs = session.scalars(
+        select(ObservationORM).where(ObservationORM.investigation_id == body.investigation_id)
+    ).all()
+    if not db_obs:
+        raise HTTPException(status_code=400, detail="No observations to report on")
+
+    observations = [
+        Observation(
+            source=o.source, claim=o.claim, url=o.url,
+            captured_at=o.captured_at, reliability_hint=o.reliability_hint,
+        )
+        for o in db_obs
+    ]
+
+    # Run pipeline
+    pipeline = SignalPipeline()
+    pipeline_result = pipeline.run(observations, topic=investigation.topic)
+
+    # Gather entities
+    entity_rows = session.scalars(
+        select(EntityMentionORM).where(EntityMentionORM.investigation_id == body.investigation_id)
+    ).all()
+    entities = [
+        {"entity_text": e.entity_text, "entity_type": e.entity_type, "confidence": e.confidence}
+        for e in entity_rows
+    ]
+    # If no stored entities, extract on the fly
+    if not entities:
+        all_text = " ".join(o.claim for o in pipeline_result.accepted[:50])
+        extracted = extract_entities(all_text)
+        entities = [{"entity_text": e.text, "entity_type": e.entity_type, "confidence": e.confidence} for e in extracted]
+
+    # Gather stories
+    story_rows = session.scalars(
+        select(StoryORM).where(StoryORM.investigation_id == body.investigation_id)
+    ).all()
+    stories = [
+        {"headline": s.headline, "observation_count": s.observation_count,
+         "source_count": s.source_count, "avg_reliability": s.avg_reliability}
+        for s in story_rows
+    ]
+
+    # Gather convergence zones
+    zone_rows = session.scalars(
+        select(ConvergenceZoneORM).where(ConvergenceZoneORM.investigation_id == body.investigation_id)
+    ).all()
+    zones = [
+        {"center_lat": z.center_lat, "center_lon": z.center_lon,
+         "signal_count": z.signal_count, "severity": z.severity,
+         "signal_types": json.loads(z.signal_types_json)}
+        for z in zone_rows
+    ]
+
+    # Generate report
+    llm_client = None
+    if body.use_llm:
+        llm_client = LocalLLMClient(
+            base_url=settings.local_llm_url,
+            model=settings.local_llm_model,
+            timeout_s=settings.agent_llm_timeout_s,
+            max_retries=settings.local_llm_max_retries,
+        )
+
+    generator = ReportGenerator(llm_client=llm_client)
+    report = generator.generate(
+        investigation_id=body.investigation_id,
+        topic=investigation.topic,
+        pipeline_result=pipeline_result,
+        entities=entities,
+        stories=stories,
+        convergence_zones=zones,
+    )
+
+    # Persist as a ReportORM
+    report_orm = ReportORM(
+        investigation_id=body.investigation_id,
+        generated_at=report.generated_at,
+        summary=report.executive_summary,
+        confidence=pipeline_result.confidence,
+        accepted_json=json.dumps(report.to_dict()),
+        dropped_json=json.dumps({"generation_method": report.generation_method}),
+    )
+    session.add(report_orm)
+    session.commit()
+
+    return {
+        "report_id": report_orm.id,
+        **report.to_dict(),
+    }
+
+
+@app.post("/reports/generate/markdown")
+def generate_report_markdown(
+    body: GenerateReportRequest,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_api_key),
+) -> Response:
+    """Generate an intelligence report and return as markdown."""
+    from sts_monitor.report_generator import ReportGenerator
+    from sts_monitor.entities import extract_entities
+
+    investigation = session.get(InvestigationORM, body.investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    db_obs = session.scalars(
+        select(ObservationORM).where(ObservationORM.investigation_id == body.investigation_id)
+    ).all()
+    if not db_obs:
+        raise HTTPException(status_code=400, detail="No observations to report on")
+
+    observations = [
+        Observation(
+            source=o.source, claim=o.claim, url=o.url,
+            captured_at=o.captured_at, reliability_hint=o.reliability_hint,
+        )
+        for o in db_obs
+    ]
+
+    pipeline = SignalPipeline()
+    pipeline_result = pipeline.run(observations, topic=investigation.topic)
+
+    # Quick entity extraction
+    all_text = " ".join(o.claim for o in pipeline_result.accepted[:50])
+    extracted = extract_entities(all_text)
+    entities = [{"entity_text": e.text, "entity_type": e.entity_type, "confidence": e.confidence} for e in extracted]
+
+    llm_client = None
+    if body.use_llm:
+        llm_client = LocalLLMClient(
+            base_url=settings.local_llm_url,
+            model=settings.local_llm_model,
+            timeout_s=settings.agent_llm_timeout_s,
+            max_retries=settings.local_llm_max_retries,
+        )
+
+    generator = ReportGenerator(llm_client=llm_client)
+    report = generator.generate(
+        investigation_id=body.investigation_id,
+        topic=investigation.topic,
+        pipeline_result=pipeline_result,
+        entities=entities,
+    )
+
+    return Response(content=report.to_markdown(), media_type="text/markdown")
+
+
+# ── Scheduled Research Agent ────────────────────────────────────────────
+
+
+class ScheduleResearchRequest(BaseModel):
+    topic: str = Field(min_length=3, max_length=500)
+    seed_query: str | None = None
+    investigation_id: str | None = None
+    interval_seconds: int = Field(default=3600, ge=300, le=86400)
+    max_iterations_per_run: int = Field(default=3, ge=1, le=10)
+
+
+@app.post("/research/agent/schedule")
+def schedule_research_agent(
+    body: ScheduleResearchRequest,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Schedule recurring autonomous research runs."""
+    schedule_name = f"research-agent:{body.topic[:60]}"
+
+    # Check for existing schedule with same name
+    existing = session.scalars(
+        select(JobScheduleORM).where(JobScheduleORM.name == schedule_name)
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Schedule '{schedule_name}' already exists (id={existing.id})")
+
+    payload = {
+        "topic": body.topic,
+        "seed_query": body.seed_query,
+        "investigation_id": body.investigation_id,
+        "max_iterations": body.max_iterations_per_run,
+    }
+    schedule = create_schedule(
+        session,
+        name=schedule_name,
+        job_type="run_research_agent",
+        payload=payload,
+        interval_seconds=body.interval_seconds,
+        priority=60,
+    )
+    return {
+        "schedule_id": schedule.id,
+        "name": schedule.name,
+        "interval_seconds": schedule.interval_seconds,
+        "topic": body.topic,
+        "active": schedule.active,
+    }
+
+
+@app.post("/research/agent/auto-investigate")
+def auto_investigate_convergence(
+    session: Session = Depends(get_session),
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Auto-launch research agents for high/critical convergence zones that lack investigations."""
+    zones = session.scalars(
+        select(ConvergenceZoneORM)
+        .where(ConvergenceZoneORM.severity.in_(["high", "critical"]))
+        .where(ConvergenceZoneORM.resolved_at.is_(None))
+        .where(ConvergenceZoneORM.investigation_id.is_(None))
+    ).all()
+
+    launched = []
+    for zone in zones:
+        signal_types = json.loads(zone.signal_types_json)
+        topic = f"Convergence zone at ({zone.center_lat:.2f}, {zone.center_lon:.2f}): {', '.join(signal_types)}"
+        seed_query = " ".join(signal_types[:3])
+
+        # Create investigation
+        inv_id = str(uuid4())
+        investigation = InvestigationORM(
+            id=inv_id,
+            topic=topic[:300],
+            seed_query=seed_query,
+            priority=80 if zone.severity == "critical" else 70,
+            status="open",
+        )
+        session.add(investigation)
+        zone.investigation_id = inv_id
+
+        # Enqueue research agent job
+        job = enqueue_job(
+            session,
+            job_type="run_research_agent",
+            payload={
+                "topic": topic,
+                "seed_query": seed_query,
+                "investigation_id": inv_id,
+            },
+            priority=80 if zone.severity == "critical" else 70,
+        )
+        launched.append({
+            "zone_id": zone.id,
+            "severity": zone.severity,
+            "investigation_id": inv_id,
+            "job_id": job.id,
+            "topic": topic,
+        })
+
+    session.commit()
+    return {"launched": len(launched), "investigations": launched}
 
 
 def _persist_geo_events(
@@ -1907,6 +2294,68 @@ def dashboard_timeline(
             {"time": k, "layers": v, "total": sum(v.values())}
             for k, v in sorted(buckets.items())
         ],
+    }
+
+
+@app.get("/dashboard/playback")
+def dashboard_playback(
+    hours: int = 48,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Temporal playback data: GeoJSON features with timestamps for time-slider animation.
+
+    Returns events sorted chronologically with their timestamps,
+    allowing the frontend to animate events appearing on the map over time.
+    """
+    cutoff = datetime.now(UTC) - timedelta(hours=max(1, min(hours, 720)))
+    rows = session.scalars(
+        select(GeoEventORM).where(GeoEventORM.event_time >= cutoff)
+        .order_by(GeoEventORM.event_time.asc())
+    ).all()
+
+    features = []
+    time_bounds = {"min": None, "max": None}
+    for r in rows:
+        ts = r.event_time.isoformat()
+        if time_bounds["min"] is None or ts < time_bounds["min"]:
+            time_bounds["min"] = ts
+        if time_bounds["max"] is None or ts > time_bounds["max"]:
+            time_bounds["max"] = ts
+
+        props = json.loads(r.properties_json) if r.properties_json else {}
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [r.longitude, r.latitude],
+            },
+            "properties": {
+                "id": r.id,
+                "layer": r.layer,
+                "title": r.title,
+                "magnitude": r.magnitude,
+                "event_time": ts,
+                "timestamp_ms": int(r.event_time.timestamp() * 1000),
+                **{k: v for k, v in props.items() if isinstance(v, (str, int, float, bool))},
+            },
+        })
+
+    # Compute hourly summary for the playback scrubber
+    hourly: dict[str, int] = {}
+    for r in rows:
+        hour_key = r.event_time.replace(minute=0, second=0, microsecond=0).isoformat()
+        hourly[hour_key] = hourly.get(hour_key, 0) + 1
+
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "metadata": {
+            "total_events": len(features),
+            "hours": hours,
+            "time_bounds": time_bounds,
+            "hourly_counts": [{"time": k, "count": v} for k, v in sorted(hourly.items())],
+        },
     }
 
 
