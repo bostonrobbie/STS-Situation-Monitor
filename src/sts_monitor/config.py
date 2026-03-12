@@ -53,6 +53,23 @@ class Settings:
     windy_api_key: str = os.getenv("STS_WINDY_API_KEY", "")
     webcam_timeout_s: float = float(os.getenv("STS_WEBCAM_TIMEOUT_S", "10"))
     webcam_default_regions: str = os.getenv("STS_WEBCAM_DEFAULT_REGIONS", "")
+    # --- Nitter / Twitter ---
+    nitter_instances: str = os.getenv("STS_NITTER_INSTANCES", "")  # comma-separated
+    nitter_timeout_s: float = float(os.getenv("STS_NITTER_TIMEOUT_S", "12"))
+    nitter_categories: str = os.getenv("STS_NITTER_CATEGORIES", "")  # comma-separated
+    # --- Web scraper ---
+    scraper_timeout_s: float = float(os.getenv("STS_SCRAPER_TIMEOUT_S", "15"))
+    scraper_max_depth: int = int(os.getenv("STS_SCRAPER_MAX_DEPTH", "2"))
+    scraper_max_pages: int = int(os.getenv("STS_SCRAPER_MAX_PAGES", "50"))
+    scraper_delay_s: float = float(os.getenv("STS_SCRAPER_DELAY_S", "1.0"))
+    # --- Search engine ---
+    search_max_results: int = int(os.getenv("STS_SEARCH_MAX_RESULTS", "20"))
+    search_timeout_s: float = float(os.getenv("STS_SEARCH_TIMEOUT_S", "15"))
+    # --- Autonomous research agent ---
+    agent_max_iterations: int = int(os.getenv("STS_AGENT_MAX_ITERATIONS", "5"))
+    agent_max_observations: int = int(os.getenv("STS_AGENT_MAX_OBSERVATIONS", "500"))
+    agent_inter_iteration_delay_s: float = float(os.getenv("STS_AGENT_INTER_ITERATION_DELAY_S", "5"))
+    agent_llm_timeout_s: float = float(os.getenv("STS_AGENT_LLM_TIMEOUT_S", "60"))
 
 
 settings = Settings()

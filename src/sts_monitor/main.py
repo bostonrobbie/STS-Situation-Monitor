@@ -1125,6 +1125,235 @@ def list_trending_topics(
     }
 
 
+# ── Autonomous Research Agent ───────────────────────────────────────────
+
+class ResearchAgentRequest(BaseModel):
+    topic: str = Field(min_length=3, max_length=500)
+    seed_query: str | None = None
+    max_iterations: int = Field(default=5, ge=1, le=20)
+    investigation_id: str | None = None
+    nitter_categories: list[str] | None = None
+    rss_categories: list[str] | None = None
+
+
+def _get_research_agent():
+    from sts_monitor.research_agent import ResearchAgent
+    from sts_monitor.connectors.nitter import DEFAULT_NITTER_INSTANCES
+    nitter_instances = parse_csv_env(settings.nitter_instances) or list(DEFAULT_NITTER_INSTANCES)
+    nitter_cats = parse_csv_env(settings.nitter_categories) or None
+    agent_llm = LocalLLMClient(
+        base_url=settings.local_llm_url,
+        model=settings.local_llm_model,
+        timeout_s=settings.agent_llm_timeout_s,
+        max_retries=settings.local_llm_max_retries,
+    )
+    return ResearchAgent(
+        llm_client=agent_llm,
+        max_iterations=settings.agent_max_iterations,
+        max_observations=settings.agent_max_observations,
+        nitter_instances=nitter_instances,
+        nitter_categories=nitter_cats,
+        inter_iteration_delay_s=settings.agent_inter_iteration_delay_s,
+        scraper_max_depth=settings.scraper_max_depth,
+        scraper_max_pages=settings.scraper_max_pages,
+        scraper_delay_s=settings.scraper_delay_s,
+        search_max_results=settings.search_max_results,
+    )
+
+
+# Singleton agent instance
+_research_agent = None
+
+
+def _get_or_create_agent():
+    global _research_agent
+    if _research_agent is None:
+        _research_agent = _get_research_agent()
+    return _research_agent
+
+
+@app.post("/research/agent/start")
+def start_research_agent(
+    body: ResearchAgentRequest,
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Launch an autonomous research session (runs in background thread)."""
+    agent = _get_or_create_agent()
+    session_id = str(uuid4())
+
+    # Override agent settings from request
+    if body.max_iterations:
+        agent.max_iterations = body.max_iterations
+    if body.nitter_categories:
+        agent.nitter_categories = body.nitter_categories
+    if body.rss_categories:
+        agent.rss_categories = body.rss_categories
+
+    agent.run_async(session_id, body.topic, body.seed_query)
+    return {
+        "session_id": session_id,
+        "topic": body.topic,
+        "status": "running",
+        "max_iterations": agent.max_iterations,
+    }
+
+
+@app.get("/research/agent/sessions")
+def list_research_sessions(
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """List all research agent sessions."""
+    agent = _get_or_create_agent()
+    return {"sessions": agent.list_sessions()}
+
+
+@app.get("/research/agent/sessions/{session_id}")
+def get_research_session(
+    session_id: str,
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Get details of a specific research session."""
+    agent = _get_or_create_agent()
+    session = agent.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    iterations_summary = []
+    for it in session.iterations:
+        iterations_summary.append({
+            "iteration": it.iteration,
+            "started_at": it.started_at.isoformat(),
+            "observations_collected": it.observations_collected,
+            "connectors_used": it.connectors_used,
+            "duration_s": it.duration_s,
+            "assessment": (it.llm_response or {}).get("assessment", ""),
+            "confidence": (it.llm_response or {}).get("confidence", 0),
+            "should_continue": (it.llm_response or {}).get("should_continue", False),
+        })
+
+    return {
+        "session_id": session.session_id,
+        "topic": session.topic,
+        "status": session.status,
+        "started_at": session.started_at.isoformat(),
+        "finished_at": session.finished_at.isoformat() if session.finished_at else None,
+        "total_observations": len(session.all_observations),
+        "total_findings": len(session.all_findings),
+        "findings": session.all_findings,
+        "iterations": iterations_summary,
+        "final_brief": session.final_brief,
+        "error": session.error,
+    }
+
+
+@app.post("/research/agent/sessions/{session_id}/stop")
+def stop_research_session(
+    session_id: str,
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Stop a running research session."""
+    agent = _get_or_create_agent()
+    stopped = agent.stop_session(session_id)
+    if not stopped:
+        raise HTTPException(status_code=404, detail="Session not found or already stopped")
+    return {"session_id": session_id, "status": "stopping"}
+
+
+@app.post("/research/agent/search")
+def agent_web_search(
+    query: str,
+    max_results: int = 20,
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Run a one-off web search via DuckDuckGo."""
+    from sts_monitor.connectors.search import SearchConnector
+    connector = SearchConnector(max_results=max_results)
+    result = connector.collect(query=query)
+    return {
+        "query": query,
+        "result_count": len(result.observations),
+        "results": [
+            {"source": o.source, "claim": o.claim[:500], "url": o.url}
+            for o in result.observations
+        ],
+    }
+
+
+class ScrapeRequest(BaseModel):
+    urls: list[str] = Field(min_length=1)
+    max_depth: int = Field(default=1, ge=0, le=3)
+    max_pages: int = Field(default=20, ge=1, le=50)
+    query: str | None = None
+
+
+@app.post("/research/agent/scrape")
+def agent_scrape_urls(
+    body: ScrapeRequest,
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Scrape one or more URLs with optional crawling."""
+    from sts_monitor.connectors.web_scraper import WebScraperConnector
+    scraper = WebScraperConnector(
+        seed_urls=body.urls[:10],
+        max_depth=body.max_depth,
+        max_pages=body.max_pages,
+    )
+    result = scraper.collect(query=body.query)
+    return {
+        "urls_submitted": len(body.urls),
+        "pages_scraped": len(result.observations),
+        "results": [
+            {"source": o.source, "claim": o.claim[:500], "url": o.url}
+            for o in result.observations
+        ],
+        "metadata": result.metadata,
+    }
+
+
+class TwitterSearchRequest(BaseModel):
+    query: str | None = None
+    accounts: list[str] | None = None
+    categories: list[str] | None = None
+
+
+@app.post("/research/agent/twitter")
+def agent_twitter_search(
+    body: TwitterSearchRequest,
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Search Twitter/X via Nitter RSS proxies."""
+    from sts_monitor.connectors.nitter import NitterConnector, get_accounts_for_categories
+    accts = list(body.accounts or [])
+    if body.categories:
+        accts.extend(get_accounts_for_categories(body.categories))
+    connector = NitterConnector(accounts=list(set(accts)))
+    result = connector.collect(query=body.query)
+    return {
+        "query": body.query,
+        "accounts_monitored": len(accts),
+        "tweet_count": len(result.observations),
+        "tweets": [
+            {"source": o.source, "claim": o.claim[:500], "url": o.url, "captured_at": o.captured_at.isoformat()}
+            for o in result.observations
+        ],
+        "metadata": result.metadata,
+    }
+
+
+@app.get("/research/agent/twitter/categories")
+def list_twitter_categories(
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """List available OSINT Twitter account categories."""
+    from sts_monitor.connectors.nitter import OSINT_ACCOUNTS, list_osint_categories
+    return {
+        "categories": [
+            {"name": cat, "account_count": len(accounts), "accounts": accounts}
+            for cat, accounts in OSINT_ACCOUNTS.items()
+        ],
+    }
+
+
 
 
 def _persist_geo_events(
