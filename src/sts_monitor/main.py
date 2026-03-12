@@ -292,10 +292,33 @@ class RelatedInvestigationsRequest(BaseModel):
     min_score: float = Field(default=0.1, ge=0.0, le=1.0)
 
 
+_scheduler_task: asyncio.Task | None = None
+
+
+async def _background_scheduler():
+    """Background loop that ticks job schedules periodically."""
+    while True:
+        try:
+            await asyncio.sleep(30)  # Check every 30 seconds
+            with next(get_session()) as session:
+                tick_schedules(session)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass  # Scheduler errors are non-fatal
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global _scheduler_task
     Base.metadata.create_all(bind=engine)
+    _scheduler_task = asyncio.create_task(_background_scheduler())
     yield
+    _scheduler_task.cancel()
+    try:
+        await _scheduler_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(title="STS Situation Monitor", version="0.7.0", lifespan=lifespan)
@@ -1155,7 +1178,22 @@ def _ingest_with_geo_connector(
 
     result = connector_obj.collect(query=query or investigation.seed_query)
 
+    # Deduplicate: skip observations whose URL already exists for this investigation
+    existing_urls: set[str] = set()
+    if result.observations:
+        rows = session.execute(
+            select(ObservationORM.url)
+            .where(ObservationORM.investigation_id == investigation_id)
+            .where(ObservationORM.url.in_([o.url for o in result.observations]))
+        ).all()
+        existing_urls = {r[0] for r in rows}
+
+    dedup_skipped = 0
     for obs in result.observations:
+        if obs.url in existing_urls:
+            dedup_skipped += 1
+            continue
+        existing_urls.add(obs.url)
         session.add(
             ObservationORM(
                 investigation_id=investigation_id,
@@ -1168,6 +1206,7 @@ def _ingest_with_geo_connector(
             )
         )
 
+    ingested_count = len(result.observations) - dedup_skipped
     geo_events = result.metadata.get("geo_events", [])
     geo_count = _persist_geo_events(session, geo_events, investigation_id=investigation_id)
 
@@ -1175,8 +1214,8 @@ def _ingest_with_geo_connector(
         session=session,
         investigation_id=investigation_id,
         connector=connector_name,
-        ingested_count=len(result.observations),
-        failed_count=0,
+        ingested_count=ingested_count,
+        failed_count=dedup_skipped,
         status="success" if not result.metadata.get("error") else "partial",
         detail={k: v for k, v in result.metadata.items() if k != "geo_events"},
     )
@@ -1185,7 +1224,7 @@ def _ingest_with_geo_connector(
         _record_audit(
             session, actor=auth, action=f"ingest.{connector_name}",
             resource_type="investigation", resource_id=investigation_id,
-            detail={"ingested": len(result.observations), "geo_events": geo_count},
+            detail={"ingested": ingested_count, "dedup_skipped": dedup_skipped, "geo_events": geo_count},
         )
 
     session.commit()
@@ -1201,7 +1240,7 @@ def _ingest_with_geo_connector(
                 ObservationORM.connector_type == connector_name,
             )
             .order_by(ObservationORM.captured_at.desc())
-            .limit(len(result.observations))
+            .limit(ingested_count)
         ).all()
         for obs_orm in recent_obs:
             entities = extract_entities(obs_orm.claim)
@@ -1228,7 +1267,8 @@ def _ingest_with_geo_connector(
         payload={
             "connector": connector_name,
             "investigation_id": investigation_id,
-            "ingested_count": len(result.observations),
+            "ingested_count": ingested_count,
+            "dedup_skipped": dedup_skipped,
             "geo_events_count": geo_count,
             "entities_extracted": entity_count,
         },
@@ -1237,7 +1277,8 @@ def _ingest_with_geo_connector(
     return {
         "investigation_id": investigation_id,
         "connector": connector_name,
-        "ingested_count": len(result.observations),
+        "ingested_count": ingested_count,
+        "dedup_skipped": dedup_skipped,
         "geo_events_count": geo_count,
         "entities_extracted": entity_count,
         "error": result.metadata.get("error"),
