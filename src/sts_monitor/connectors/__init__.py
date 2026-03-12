@@ -7,6 +7,8 @@ from sts_monitor.connectors.nasa_firms import NASAFIRMSConnector
 from sts_monitor.connectors.acled import ACLEDConnector
 from sts_monitor.connectors.nws import NWSAlertConnector
 from sts_monitor.connectors.fema import FEMADisasterConnector
+from sts_monitor.connectors.reliefweb import ReliefWebConnector
+from sts_monitor.connectors.opensky import OpenSkyConnector
 
 __all__ = [
     "Connector",
@@ -19,4 +21,6 @@ __all__ = [
     "ACLEDConnector",
     "NWSAlertConnector",
     "FEMADisasterConnector",
+    "ReliefWebConnector",
+    "OpenSkyConnector",
 ]

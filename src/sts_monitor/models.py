@@ -275,3 +275,85 @@ class SearchProfileORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
 
     investigation: Mapped[InvestigationORM | None] = relationship()
+
+
+class EntityMentionORM(Base):
+    __tablename__ = "entity_mentions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    observation_id: Mapped[int] = mapped_column(ForeignKey("observations.id", ondelete="CASCADE"), index=True)
+    investigation_id: Mapped[str] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
+    entity_text: Mapped[str] = mapped_column(String(300), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    normalized: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    start_pos: Mapped[int] = mapped_column(Integer, default=0)
+    end_pos: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+    observation: Mapped[ObservationORM] = relationship()
+    investigation: Mapped[InvestigationORM] = relationship()
+
+
+class StoryORM(Base):
+    __tablename__ = "stories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    investigation_id: Mapped[str | None] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), nullable=True, index=True)
+    headline: Mapped[str] = mapped_column(String(500), nullable=False)
+    key_terms_json: Mapped[str] = mapped_column(Text, default="[]")
+    entities_json: Mapped[str] = mapped_column(Text, default="[]")
+    source_count: Mapped[int] = mapped_column(Integer, default=0)
+    observation_count: Mapped[int] = mapped_column(Integer, default=0)
+    avg_reliability: Mapped[float] = mapped_column(Float, default=0.5)
+    trending_score: Mapped[float] = mapped_column(Float, default=0.0)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+
+class StoryObservationORM(Base):
+    __tablename__ = "story_observations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    story_id: Mapped[int] = mapped_column(ForeignKey("stories.id", ondelete="CASCADE"), index=True)
+    observation_id: Mapped[int] = mapped_column(ForeignKey("observations.id", ondelete="CASCADE"), index=True)
+
+
+class DiscoveredTopicORM(Base):
+    __tablename__ = "discovered_topics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    score: Mapped[float] = mapped_column(Float, default=0.5)
+    source: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    key_terms_json: Mapped[str] = mapped_column(Text, default="[]")
+    entities_json: Mapped[str] = mapped_column(Text, default="[]")
+    sample_urls_json: Mapped[str] = mapped_column(Text, default="[]")
+    suggested_seed_query: Mapped[str] = mapped_column(String(500), default="")
+    suggested_connectors_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(30), default="new", index=True)
+    promoted_investigation_id: Mapped[str | None] = mapped_column(ForeignKey("investigations.id", ondelete="SET NULL"), nullable=True)
+    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+
+class CollectionPlanORM(Base):
+    __tablename__ = "collection_plans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    investigation_id: Mapped[str] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    connectors_json: Mapped[str] = mapped_column(Text, nullable=False)
+    query: Mapped[str] = mapped_column(String(500), nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, default=50)
+    interval_seconds: Mapped[int] = mapped_column(Integer, default=3600)
+    filters_json: Mapped[str] = mapped_column(Text, default="{}")
+    active: Mapped[bool] = mapped_column(default=True, index=True)
+    last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    total_collected: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+    investigation: Mapped[InvestigationORM] = relationship()

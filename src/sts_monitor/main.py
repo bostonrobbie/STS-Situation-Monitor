@@ -26,17 +26,22 @@ from sts_monitor.discovery import build_discovery_summary
 from sts_monitor.connectors import (
     RSSConnector, RedditConnector, GDELTConnector, USGSEarthquakeConnector,
     NASAFIRMSConnector, ACLEDConnector, NWSAlertConnector, FEMADisasterConnector,
+    ReliefWebConnector, OpenSkyConnector,
 )
 from sts_monitor.database import Base, engine, get_session
 from sts_monitor.jobs import create_schedule, enqueue_job, process_job_batch, process_next_job, requeue_dead_letter, tick_schedules
 from sts_monitor.llm import LocalLLMClient
-from sts_monitor.models import APIKeyORM, AlertEventORM, AlertRuleORM, AuditLogORM, ClaimEvidenceORM, ClaimORM, ConvergenceZoneORM, DashboardConfigORM, FeedbackORM, GeoEventORM, IngestionRunORM, InvestigationORM, JobORM, JobScheduleORM, ObservationORM, ReportORM, ResearchSourceORM, SearchProfileORM
+from sts_monitor.models import APIKeyORM, AlertEventORM, AlertRuleORM, AuditLogORM, ClaimEvidenceORM, ClaimORM, CollectionPlanORM, ConvergenceZoneORM, DashboardConfigORM, DiscoveredTopicORM, EntityMentionORM, FeedbackORM, GeoEventORM, IngestionRunORM, InvestigationORM, JobORM, JobScheduleORM, ObservationORM, ReportORM, ResearchSourceORM, SearchProfileORM, StoryORM, StoryObservationORM
 from sts_monitor.online_tools import parse_csv_env, send_alert_webhook
 from sts_monitor.pipeline import Observation, SignalPipeline
 from sts_monitor.search import apply_context_boosts, build_query_plan, normalize_datetime, score_text, top_terms
+from sts_monitor.clustering import ObservationRef, cluster_observations, enrich_stories_with_entities
+from sts_monitor.collection_plan import CollectionRequirement, build_collection_plan, get_curated_feeds, list_feed_categories
 from sts_monitor.convergence import GeoPoint, detect_convergence
+from sts_monitor.entities import extract_entities
 from sts_monitor.event_bus import STSEvent, event_bus
 from sts_monitor.research import TrendingResearchScanner
+from sts_monitor.story_discovery import ObservationSnapshot, run_discovery
 from sts_monitor.security import AuthContext, hash_api_key, now_utc, require_admin, require_analyst, require_api_key
 from sts_monitor.simulation import generate_simulated_observations
 
@@ -140,6 +145,39 @@ class FEMAIngestRequest(BaseModel):
     limit: int = Field(default=100, ge=1, le=1000)
     state: str | None = Field(default=None, min_length=2, max_length=2)
     declaration_type: str | None = Field(default=None, pattern="^(DR|EM|FM|FS)$")
+
+
+class ReliefWebIngestRequest(BaseModel):
+    query: str | None = None
+    lookback_days: int = Field(default=7, ge=1, le=365)
+    limit: int = Field(default=50, ge=1, le=500)
+    country: str | None = None
+    disaster_type: str | None = None
+    content_format: str | None = None
+
+
+class OpenSkyIngestRequest(BaseModel):
+    query: str | None = None
+    bbox_lamin: float | None = None
+    bbox_lomin: float | None = None
+    bbox_lamax: float | None = None
+    bbox_lomax: float | None = None
+
+
+class CollectionPlanCreateRequest(BaseModel):
+    investigation_id: str
+    name: str = Field(min_length=3, max_length=200)
+    connectors: list[str] = Field(min_length=1)
+    query: str = Field(min_length=2, max_length=500)
+    priority: int = Field(default=50, ge=1, le=100)
+    interval_seconds: int = Field(default=3600, ge=60, le=86_400)
+    filters: dict[str, Any] = Field(default_factory=dict)
+    auto_generate: bool = False
+
+
+class PromoteTopicRequest(BaseModel):
+    priority: int = Field(default=50, ge=1, le=100)
+    owner: str | None = None
 
 
 class RunRequest(BaseModel):
@@ -1597,6 +1635,565 @@ def dashboard_live(
             for a in recent_alerts
         ],
     }
+
+
+# ── ReliefWeb Humanitarian Connector Endpoint ──────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/ingest/reliefweb")
+def ingest_reliefweb(
+    investigation_id: str,
+    payload: ReliefWebIngestRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    connector = ReliefWebConnector(
+        lookback_days=payload.lookback_days,
+        limit=payload.limit,
+        country=payload.country,
+        disaster_type=payload.disaster_type,
+        content_format=payload.content_format,
+    )
+    return _ingest_with_geo_connector(
+        session, investigation_id, "reliefweb", connector, payload.query, auth,
+    )
+
+
+# ── OpenSky Aircraft Connector Endpoint ────────────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/ingest/opensky")
+def ingest_opensky(
+    investigation_id: str,
+    payload: OpenSkyIngestRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    bbox = None
+    if all(v is not None for v in [payload.bbox_lamin, payload.bbox_lomin, payload.bbox_lamax, payload.bbox_lomax]):
+        bbox = (payload.bbox_lamin, payload.bbox_lomin, payload.bbox_lamax, payload.bbox_lomax)
+    connector = OpenSkyConnector(bbox=bbox)
+    return _ingest_with_geo_connector(
+        session, investigation_id, "opensky", connector, payload.query, auth,
+    )
+
+
+# ── Entity Extraction Endpoint ─────────────────────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/extract-entities")
+def extract_investigation_entities(
+    investigation_id: str,
+    limit: int = 500,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Extract entities from all observations in an investigation."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    observations = session.scalars(
+        select(ObservationORM)
+        .where(ObservationORM.investigation_id == investigation_id)
+        .order_by(ObservationORM.captured_at.desc())
+        .limit(max(1, min(limit, 2000)))
+    ).all()
+
+    total_extracted = 0
+    entity_counts: dict[str, int] = {}
+
+    for obs in observations:
+        entities = extract_entities(obs.claim)
+        for ent in entities:
+            existing = session.scalars(
+                select(EntityMentionORM).where(
+                    EntityMentionORM.observation_id == obs.id,
+                    EntityMentionORM.entity_text == ent.text,
+                    EntityMentionORM.entity_type == ent.entity_type,
+                ).limit(1)
+            ).first()
+            if existing:
+                continue
+
+            session.add(EntityMentionORM(
+                observation_id=obs.id,
+                investigation_id=investigation_id,
+                entity_text=ent.text,
+                entity_type=ent.entity_type,
+                normalized=ent.normalized or ent.text,
+                confidence=ent.confidence,
+                start_pos=ent.start,
+                end_pos=ent.end,
+            ))
+            total_extracted += 1
+            key = ent.entity_type
+            entity_counts[key] = entity_counts.get(key, 0) + 1
+
+    session.commit()
+    return {
+        "investigation_id": investigation_id,
+        "observations_processed": len(observations),
+        "entities_extracted": total_extracted,
+        "by_type": entity_counts,
+    }
+
+
+@app.get("/investigations/{investigation_id}/entities")
+def list_investigation_entities(
+    investigation_id: str,
+    entity_type: str | None = None,
+    min_confidence: float = 0.0,
+    limit: int = 200,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """List extracted entities for an investigation with frequency counts."""
+    q = select(
+        EntityMentionORM.normalized,
+        EntityMentionORM.entity_type,
+        func.count(EntityMentionORM.id).label("mention_count"),
+        func.avg(EntityMentionORM.confidence).label("avg_confidence"),
+    ).where(
+        EntityMentionORM.investigation_id == investigation_id,
+        EntityMentionORM.confidence >= min_confidence,
+    ).group_by(
+        EntityMentionORM.normalized, EntityMentionORM.entity_type
+    )
+
+    if entity_type:
+        q = q.where(EntityMentionORM.entity_type == entity_type)
+
+    q = q.order_by(func.count(EntityMentionORM.id).desc()).limit(max(1, min(limit, 1000)))
+    rows = session.execute(q).all()
+
+    return {
+        "investigation_id": investigation_id,
+        "entities": [
+            {
+                "text": row.normalized,
+                "type": row.entity_type,
+                "mention_count": row.mention_count,
+                "avg_confidence": round(float(row.avg_confidence), 3),
+            }
+            for row in rows
+        ],
+    }
+
+
+# ── Story Clustering Endpoint ──────────────────────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/cluster-stories")
+def cluster_investigation_stories(
+    investigation_id: str,
+    hours: int = 48,
+    min_cluster_size: int = 2,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Cluster observations into stories for an investigation."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+    observations = session.scalars(
+        select(ObservationORM)
+        .where(ObservationORM.investigation_id == investigation_id)
+        .where(ObservationORM.captured_at >= cutoff)
+        .order_by(ObservationORM.captured_at.desc())
+        .limit(2000)
+    ).all()
+
+    obs_refs = [
+        ObservationRef(
+            id=o.id, source=o.source, claim=o.claim, url=o.url,
+            captured_at=o.captured_at, reliability_hint=o.reliability_hint,
+            connector_type=o.connector_type, investigation_id=investigation_id,
+        )
+        for o in observations
+    ]
+
+    stories = cluster_observations(
+        obs_refs,
+        time_window_hours=hours,
+        min_cluster_size=min_cluster_size,
+    )
+
+    # Enrich with entities
+    enrich_stories_with_entities(stories, extract_entities)
+
+    # Persist stories
+    persisted = 0
+    for story in stories:
+        row = StoryORM(
+            investigation_id=investigation_id,
+            headline=story.headline[:500],
+            key_terms_json=json.dumps(story.key_terms),
+            entities_json=json.dumps(story.entities),
+            source_count=story.source_count,
+            observation_count=story.observation_count,
+            avg_reliability=story.avg_reliability,
+            trending_score=story.trending_score,
+            first_seen=story.first_seen,
+            last_seen=story.last_seen,
+        )
+        session.add(row)
+        session.flush()
+
+        for obs in story.observations:
+            session.add(StoryObservationORM(story_id=row.id, observation_id=obs.id))
+        persisted += 1
+
+    session.commit()
+
+    return {
+        "investigation_id": investigation_id,
+        "observations_analyzed": len(observations),
+        "stories_found": len(stories),
+        "stories": [
+            {
+                "headline": s.headline[:200],
+                "key_terms": s.key_terms,
+                "entities": s.entities[:10],
+                "sources": s.sources,
+                "observation_count": s.observation_count,
+                "trending_score": s.trending_score,
+                "first_seen": s.first_seen.isoformat(),
+                "last_seen": s.last_seen.isoformat(),
+            }
+            for s in stories
+        ],
+    }
+
+
+@app.get("/investigations/{investigation_id}/stories")
+def list_investigation_stories(
+    investigation_id: str,
+    limit: int = 50,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> list[dict[str, Any]]:
+    rows = session.scalars(
+        select(StoryORM)
+        .where(StoryORM.investigation_id == investigation_id)
+        .order_by(StoryORM.trending_score.desc())
+        .limit(max(1, min(limit, 200)))
+    ).all()
+    return [
+        {
+            "id": r.id,
+            "headline": r.headline,
+            "key_terms": json.loads(r.key_terms_json),
+            "entities": json.loads(r.entities_json),
+            "source_count": r.source_count,
+            "observation_count": r.observation_count,
+            "trending_score": r.trending_score,
+            "first_seen": r.first_seen.isoformat(),
+            "last_seen": r.last_seen.isoformat(),
+        }
+        for r in rows
+    ]
+
+
+# ── Story Discovery Endpoint ──────────────────────────────────────────
+
+
+@app.post("/discovery/run")
+def run_story_discovery(
+    hours: int = 24,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Run automated story discovery across all recent observations."""
+    cutoff = datetime.now(UTC) - timedelta(hours=max(1, min(hours, 168)))
+
+    observations = session.scalars(
+        select(ObservationORM)
+        .where(ObservationORM.captured_at >= cutoff)
+        .order_by(ObservationORM.captured_at.desc())
+        .limit(5000)
+    ).all()
+
+    snapshots = [
+        ObservationSnapshot(
+            claim=o.claim, source=o.source,
+            captured_at=o.captured_at, url=o.url,
+            reliability_hint=o.reliability_hint,
+        )
+        for o in observations
+    ]
+
+    # Get convergence zones for cross-referencing
+    zones = session.scalars(
+        select(ConvergenceZoneORM)
+        .where(ConvergenceZoneORM.resolved_at.is_(None))
+        .order_by(ConvergenceZoneORM.last_updated_at.desc())
+        .limit(20)
+    ).all()
+
+    zone_dicts = [
+        {
+            "signal_types": json.loads(z.signal_types_json),
+            "severity": z.severity,
+            "center_lat": z.center_lat,
+            "center_lon": z.center_lon,
+            "radius_km": z.radius_km,
+        }
+        for z in zones
+    ]
+
+    topics = run_discovery(snapshots, convergence_zones=zone_dicts)
+
+    # Persist discovered topics
+    for topic in topics:
+        session.add(DiscoveredTopicORM(
+            title=topic.title[:500],
+            description=topic.description[:2000],
+            score=topic.score,
+            source=topic.source,
+            key_terms_json=json.dumps(topic.key_terms),
+            entities_json=json.dumps(topic.entities),
+            sample_urls_json=json.dumps(topic.sample_urls),
+            suggested_seed_query=topic.suggested_seed_query[:500],
+            suggested_connectors_json=json.dumps(topic.suggested_connectors),
+            status="new",
+        ))
+
+    session.commit()
+
+    event_bus.publish_sync(STSEvent(
+        event_type="discovery",
+        payload={"topics_found": len(topics)},
+    ))
+
+    return {
+        "observations_analyzed": len(observations),
+        "topics_discovered": len(topics),
+        "topics": [
+            {
+                "title": t.title,
+                "description": t.description[:200],
+                "score": t.score,
+                "source": t.source,
+                "key_terms": t.key_terms,
+                "entities": t.entities[:5],
+                "suggested_seed_query": t.suggested_seed_query,
+                "suggested_connectors": t.suggested_connectors,
+            }
+            for t in topics
+        ],
+    }
+
+
+@app.get("/discovery/topics")
+def list_discovered_topics(
+    status: str | None = None,
+    limit: int = 50,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> list[dict[str, Any]]:
+    q = select(DiscoveredTopicORM)
+    if status:
+        q = q.where(DiscoveredTopicORM.status == status)
+    q = q.order_by(DiscoveredTopicORM.score.desc()).limit(max(1, min(limit, 200)))
+    rows = session.scalars(q).all()
+    return [
+        {
+            "id": r.id,
+            "title": r.title,
+            "description": r.description[:200],
+            "score": r.score,
+            "source": r.source,
+            "key_terms": json.loads(r.key_terms_json),
+            "suggested_seed_query": r.suggested_seed_query,
+            "suggested_connectors": json.loads(r.suggested_connectors_json),
+            "status": r.status,
+            "discovered_at": r.discovered_at.isoformat(),
+        }
+        for r in rows
+    ]
+
+
+@app.post("/discovery/topics/{topic_id}/promote")
+def promote_discovered_topic(
+    topic_id: int,
+    payload: PromoteTopicRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Promote a discovered topic into a full investigation with auto-generated collection plan."""
+    topic = session.get(DiscoveredTopicORM, topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Discovered topic not found")
+
+    # Create investigation
+    inv_id = str(uuid4())
+    investigation = InvestigationORM(
+        id=inv_id,
+        topic=topic.title[:300],
+        seed_query=topic.suggested_seed_query or topic.title[:200],
+        priority=payload.priority,
+        owner=payload.owner,
+        status="open",
+    )
+    session.add(investigation)
+
+    # Auto-generate collection plan
+    connectors = json.loads(topic.suggested_connectors_json) or ["gdelt", "rss"]
+    plan = CollectionPlanORM(
+        investigation_id=inv_id,
+        name=f"Auto: {topic.title[:150]}",
+        description=topic.description[:500],
+        connectors_json=json.dumps(connectors),
+        query=topic.suggested_seed_query or topic.title[:200],
+        priority=payload.priority,
+        interval_seconds=3600,
+    )
+    session.add(plan)
+
+    # Update topic status
+    topic.status = "promoted"
+    topic.promoted_investigation_id = inv_id
+
+    _record_audit(
+        session, actor=auth, action="discovery.promote",
+        resource_type="discovered_topic", resource_id=str(topic_id),
+        detail={"investigation_id": inv_id},
+    )
+    session.commit()
+
+    return {
+        "investigation_id": inv_id,
+        "topic_id": topic_id,
+        "collection_plan_id": plan.id,
+        "connectors": connectors,
+    }
+
+
+@app.post("/discovery/topics/{topic_id}/dismiss")
+def dismiss_discovered_topic(
+    topic_id: int,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    topic = session.get(DiscoveredTopicORM, topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Discovered topic not found")
+    topic.status = "dismissed"
+    session.commit()
+    return {"topic_id": topic_id, "status": "dismissed"}
+
+
+# ── Collection Plan Endpoints ──────────────────────────────────────────
+
+
+@app.post("/collection-plans")
+def create_collection_plan(
+    payload: CollectionPlanCreateRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Create a collection plan for an investigation, optionally auto-generating from topic."""
+    investigation = session.get(InvestigationORM, payload.investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    if payload.auto_generate:
+        requirements = build_collection_plan(
+            investigation.topic,
+            seed_query=investigation.seed_query,
+            priority=payload.priority,
+        )
+        plans = []
+        for req in requirements:
+            plan = CollectionPlanORM(
+                investigation_id=payload.investigation_id,
+                name=req.name[:200],
+                description=req.description[:500],
+                connectors_json=json.dumps(req.connectors),
+                query=req.query[:500],
+                priority=req.priority,
+                interval_seconds=req.interval_seconds,
+                filters_json=json.dumps(req.filters, default=str),
+            )
+            session.add(plan)
+            plans.append(plan)
+        session.commit()
+        return {
+            "investigation_id": payload.investigation_id,
+            "plans_created": len(plans),
+            "plans": [{"id": p.id, "name": p.name, "connectors": json.loads(p.connectors_json)} for p in plans],
+        }
+
+    plan = CollectionPlanORM(
+        investigation_id=payload.investigation_id,
+        name=payload.name,
+        connectors_json=json.dumps(payload.connectors),
+        query=payload.query,
+        priority=payload.priority,
+        interval_seconds=payload.interval_seconds,
+        filters_json=json.dumps(payload.filters, default=str),
+    )
+    session.add(plan)
+    _record_audit(session, actor=auth, action="collection_plan.create",
+                  resource_type="collection_plan", resource_id=payload.investigation_id)
+    session.commit()
+    return {"id": plan.id, "name": plan.name, "connectors": payload.connectors}
+
+
+@app.get("/collection-plans")
+def list_collection_plans(
+    investigation_id: str | None = None,
+    active_only: bool = True,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> list[dict[str, Any]]:
+    q = select(CollectionPlanORM)
+    if investigation_id:
+        q = q.where(CollectionPlanORM.investigation_id == investigation_id)
+    if active_only:
+        q = q.where(CollectionPlanORM.active.is_(True))
+    q = q.order_by(CollectionPlanORM.priority.desc())
+    rows = session.scalars(q).all()
+    return [
+        {
+            "id": r.id,
+            "investigation_id": r.investigation_id,
+            "name": r.name,
+            "connectors": json.loads(r.connectors_json),
+            "query": r.query,
+            "priority": r.priority,
+            "interval_seconds": r.interval_seconds,
+            "active": r.active,
+            "last_collected_at": r.last_collected_at.isoformat() if r.last_collected_at else None,
+            "total_collected": r.total_collected,
+        }
+        for r in rows
+    ]
+
+
+# ── Curated Feed Library ──────────────────────────────────────────────
+
+
+@app.get("/feeds/categories")
+def list_feed_categories_endpoint(
+    _: None = Depends(require_api_key),
+) -> list[dict[str, Any]]:
+    """List curated RSS feed categories with available feeds."""
+    return list_feed_categories()
+
+
+@app.get("/feeds/by-category")
+def get_feeds_by_category(
+    categories: str | None = None,
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Get curated feeds, optionally filtered by comma-separated categories."""
+    cat_list = [c.strip() for c in categories.split(",") if c.strip()] if categories else None
+    feeds = get_curated_feeds(cat_list)
+    return {"count": len(feeds), "feeds": feeds}
 
 
 @app.post("/research/sources")
