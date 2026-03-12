@@ -230,6 +230,7 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; back
     <div class="tab-bar">
       <div class="tab active" onclick="switchTab('events')">Events</div>
       <div class="tab" onclick="switchTab('zones')">Zones</div>
+      <div class="tab" onclick="switchTab('intel')">Intel</div>
       <div class="tab" onclick="switchTab('cameras')">Cameras</div>
       <div class="tab" onclick="switchTab('alerts')">Alerts</div>
     </div>
@@ -238,6 +239,77 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; back
     </div>
     <div class="tab-content" id="tab-zones">
       <div style="padding:12px" id="convergence-zones"></div>
+    </div>
+    <div class="tab-content" id="tab-intel">
+      <div style="padding:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <h3 style="margin:0;font-size:14px">Intelligence Analysis</h3>
+          <select id="intel-investigation" style="background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px" onchange="runIntelAnalysis()">
+            <option value="">Select investigation...</option>
+          </select>
+        </div>
+
+        <!-- Corroboration Gauge -->
+        <div class="panel-section" id="corroboration-panel" style="margin-bottom:12px;display:none">
+          <h4 style="font-size:12px;color:var(--accent);margin:0 0 8px">Source Corroboration</h4>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:8px">
+            <div class="stat-card" style="padding:6px;text-align:center">
+              <div style="font-size:16px;font-weight:700;color:#22c55e" id="corr-well">0</div>
+              <div style="font-size:9px;color:var(--text-secondary)">Verified</div>
+            </div>
+            <div class="stat-card" style="padding:6px;text-align:center">
+              <div style="font-size:16px;font-weight:700;color:#f59e0b" id="corr-partial">0</div>
+              <div style="font-size:9px;color:var(--text-secondary)">Partial</div>
+            </div>
+            <div class="stat-card" style="padding:6px;text-align:center">
+              <div style="font-size:16px;font-weight:700;color:#ef4444" id="corr-single">0</div>
+              <div style="font-size:9px;color:var(--text-secondary)">Unverified</div>
+            </div>
+            <div class="stat-card" style="padding:6px;text-align:center">
+              <div style="font-size:16px;font-weight:700;color:#a855f7" id="corr-contested">0</div>
+              <div style="font-size:9px;color:var(--text-secondary)">Contested</div>
+            </div>
+          </div>
+          <div id="corr-breakdown" style="font-size:11px;color:var(--text-secondary)"></div>
+        </div>
+
+        <!-- Slop/Quality Filter -->
+        <div class="panel-section" id="quality-panel" style="margin-bottom:12px;display:none">
+          <h4 style="font-size:12px;color:var(--accent);margin:0 0 8px">Content Quality</h4>
+          <div id="quality-bar" style="height:20px;border-radius:4px;overflow:hidden;display:flex;margin-bottom:6px"></div>
+          <div id="quality-stats" style="font-size:11px;color:var(--text-secondary)"></div>
+          <div id="quality-flags" style="margin-top:6px;font-size:10px"></div>
+        </div>
+
+        <!-- Anomaly Alerts -->
+        <div class="panel-section" id="anomaly-panel" style="margin-bottom:12px;display:none">
+          <h4 style="font-size:12px;color:var(--accent);margin:0 0 8px">Anomalies Detected</h4>
+          <div id="anomaly-list"></div>
+        </div>
+
+        <!-- Narrative Summary -->
+        <div class="panel-section" id="narrative-panel" style="margin-bottom:12px;display:none">
+          <h4 style="font-size:12px;color:var(--accent);margin:0 0 8px">Narrative Timeline</h4>
+          <div id="narrative-summary" style="font-size:11px;color:var(--text-secondary);margin-bottom:8px"></div>
+          <div id="narrative-phases" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px"></div>
+          <div id="narrative-events"></div>
+        </div>
+
+        <!-- Entity Graph Summary -->
+        <div class="panel-section" id="entity-graph-panel" style="margin-bottom:12px;display:none">
+          <h4 style="font-size:12px;color:var(--accent);margin:0 0 8px">Entity Network</h4>
+          <div id="entity-graph-stats" style="font-size:11px;color:var(--text-secondary);margin-bottom:8px"></div>
+          <div id="entity-graph-top"></div>
+          <div id="entity-graph-bridges" style="margin-top:6px"></div>
+        </div>
+
+        <div id="intel-loading" style="display:none;text-align:center;padding:20px;color:var(--text-secondary)">
+          Analyzing...
+        </div>
+        <div id="intel-empty" style="text-align:center;padding:20px;color:var(--text-secondary);font-size:12px">
+          Select an investigation to run full intelligence analysis.
+        </div>
+      </div>
     </div>
     <div class="tab-content" id="tab-cameras">
       <div class="panel-section">
@@ -712,6 +784,148 @@ function scrubPlayback(value) {
   if (playbackData) renderPlaybackFrame(playbackIndex);
 }
 
+// ── Intelligence Analysis ──────────────────────────────────────────────
+
+async function loadInvestigationsForIntel() {
+  try {
+    const resp = await fetch(`${API_BASE}/investigations?limit=20`, { headers: HEADERS });
+    const data = await resp.json();
+    const sel = document.getElementById('intel-investigation');
+    if (!sel || !Array.isArray(data)) return;
+    data.forEach(inv => {
+      const opt = document.createElement('option');
+      opt.value = inv.id;
+      opt.textContent = `${inv.topic.substring(0, 40)} (${inv.status})`;
+      sel.appendChild(opt);
+    });
+  } catch(e) { console.warn('Failed to load investigations for intel:', e); }
+}
+
+async function runIntelAnalysis() {
+  const invId = document.getElementById('intel-investigation').value;
+  if (!invId) return;
+
+  document.getElementById('intel-loading').style.display = 'block';
+  document.getElementById('intel-empty').style.display = 'none';
+  ['corroboration-panel', 'quality-panel', 'anomaly-panel', 'narrative-panel', 'entity-graph-panel']
+    .forEach(id => document.getElementById(id).style.display = 'none');
+
+  try {
+    const resp = await fetch(`${API_BASE}/analysis/full`, {
+      method: 'POST', headers: HEADERS,
+      body: JSON.stringify({ investigation_id: invId })
+    });
+    const data = await resp.json();
+    document.getElementById('intel-loading').style.display = 'none';
+    renderIntelResults(data);
+  } catch(e) {
+    document.getElementById('intel-loading').style.display = 'none';
+    document.getElementById('intel-empty').style.display = 'block';
+    document.getElementById('intel-empty').textContent = 'Analysis failed: ' + e.message;
+  }
+}
+
+function renderIntelResults(data) {
+  // Corroboration
+  if (data.corroboration) {
+    const c = data.corroboration;
+    document.getElementById('corr-well').textContent = c.well_corroborated || 0;
+    document.getElementById('corr-partial').textContent = (c.total_claims - c.well_corroborated - c.single_source) || 0;
+    document.getElementById('corr-single').textContent = c.single_source || 0;
+    document.getElementById('corr-contested').textContent = 0;
+    document.getElementById('corr-breakdown').innerHTML =
+      `Corroboration rate: <strong style="color:${c.rate > 0.5 ? '#22c55e' : c.rate > 0.2 ? '#f59e0b' : '#ef4444'}">${(c.rate * 100).toFixed(0)}%</strong> across ${c.total_claims} claim clusters`;
+    document.getElementById('corroboration-panel').style.display = 'block';
+  }
+
+  // Quality / Slop
+  if (data.quality) {
+    const q = data.quality;
+    const total = q.credible + q.suspicious + q.slop + q.propaganda || 1;
+    const bar = document.getElementById('quality-bar');
+    bar.innerHTML = [
+      { pct: q.credible/total*100, color: '#22c55e', label: 'Credible' },
+      { pct: q.suspicious/total*100, color: '#f59e0b', label: 'Suspicious' },
+      { pct: q.slop/total*100, color: '#ef4444', label: 'Slop' },
+      { pct: q.propaganda/total*100, color: '#a855f7', label: 'Propaganda' },
+    ].filter(s => s.pct > 0).map(s =>
+      `<div style="width:${s.pct}%;background:${s.color}" title="${s.label}: ${s.pct.toFixed(0)}%"></div>`
+    ).join('');
+
+    document.getElementById('quality-stats').innerHTML =
+      `<span style="color:#22c55e">${q.credible} credible</span> &middot; ` +
+      `<span style="color:#f59e0b">${q.suspicious} suspicious</span> &middot; ` +
+      `<span style="color:#ef4444">${q.slop} slop</span> &middot; ` +
+      `<span style="color:#a855f7">${q.propaganda} propaganda</span>`;
+
+    const flags = Object.entries(q.pattern_stats || {}).slice(0, 5);
+    document.getElementById('quality-flags').innerHTML = flags.length ?
+      '<div style="color:var(--text-secondary)">Top flags: ' +
+      flags.map(([k, v]) => `<span style="background:var(--bg-secondary);padding:1px 6px;border-radius:3px;margin:2px">${k} (${v})</span>`).join(' ') + '</div>' : '';
+    document.getElementById('quality-panel').style.display = 'block';
+  }
+
+  // Anomalies
+  if (data.anomalies && data.anomalies.total > 0) {
+    const sevColors = { critical: '#ef4444', high: '#f59e0b', medium: '#06b6d4', low: '#6b7280' };
+    const items = (data.anomalies.by_severity || {});
+    let html = '<div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">';
+    for (const [sev, count] of Object.entries(items)) {
+      html += `<span style="background:${sevColors[sev] || '#6b7280'};color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">${sev}: ${count}</span>`;
+    }
+    html += '</div>';
+    html += `<div style="font-size:11px;color:var(--text-secondary)">${data.anomalies.total} anomalies detected across ${Object.keys(data.anomalies.by_type || {}).length} categories</div>`;
+    document.getElementById('anomaly-list').innerHTML = html;
+    document.getElementById('anomaly-panel').style.display = 'block';
+  }
+
+  // Narrative
+  if (data.narrative) {
+    const n = data.narrative;
+    document.getElementById('narrative-summary').textContent = n.summary || '';
+
+    const phaseColors = {
+      initial_report: '#3b82f6', corroboration: '#22c55e', escalation: '#ef4444',
+      response: '#f59e0b', de_escalation: '#06b6d4', update: '#6b7280'
+    };
+    const phasesHtml = Object.entries(n.phases || {}).map(([phase, count]) =>
+      `<span style="background:${phaseColors[phase] || '#6b7280'};color:#fff;padding:2px 8px;border-radius:10px;font-size:10px">${phase.replace('_', ' ')}: ${count}</span>`
+    ).join('');
+    document.getElementById('narrative-phases').innerHTML = phasesHtml;
+
+    if (n.time_span_hours) {
+      document.getElementById('narrative-events').innerHTML =
+        `<div style="font-size:11px;color:var(--text-secondary)">Spans ${n.time_span_hours.toFixed(1)}h with ${n.pivots || 0} pivot points</div>`;
+    }
+    document.getElementById('narrative-panel').style.display = 'block';
+  }
+
+  // Entity Graph
+  if (data.entity_graph) {
+    const g = data.entity_graph;
+    document.getElementById('entity-graph-stats').innerHTML =
+      `${g.nodes} entities, ${g.edges} connections, ${g.communities} communities`;
+
+    const typeColors = { person: '#3b82f6', organization: '#a855f7', location: '#22c55e', weapon: '#ef4444' };
+    const topHtml = (g.top_entities || []).map(e =>
+      `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:11px;border-bottom:1px solid var(--border)">
+        <span style="width:8px;height:8px;border-radius:50%;background:${typeColors[e.type] || '#6b7280'};flex-shrink:0"></span>
+        <span style="flex:1">${e.label}</span>
+        <span style="color:var(--text-secondary);font-size:10px">${e.type}</span>
+        <span style="color:var(--accent);font-size:10px">${e.mentions} mentions</span>
+        ${e.is_bridge ? '<span style="background:#f59e0b;color:#000;padding:1px 4px;border-radius:3px;font-size:9px;font-weight:600">BRIDGE</span>' : ''}
+      </div>`
+    ).join('');
+    document.getElementById('entity-graph-top').innerHTML = topHtml;
+
+    if (g.bridge_entities && g.bridge_entities.length > 0) {
+      document.getElementById('entity-graph-bridges').innerHTML =
+        `<div style="font-size:10px;color:var(--text-secondary)">Bridge entities (connecting clusters): ${g.bridge_entities.join(', ')}</div>`;
+    }
+    document.getElementById('entity-graph-panel').style.display = 'block';
+  }
+}
+
 // ── Init ───────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -725,6 +939,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadStoryCount();
 
   loadPlaybackData();
+  loadInvestigationsForIntel();
 
   // Try SSE
   try { connectSSE(); } catch(e) { console.warn('SSE unavailable:', e); }

@@ -45,6 +45,11 @@ from sts_monitor.research import TrendingResearchScanner
 from sts_monitor.story_discovery import ObservationSnapshot, run_discovery
 from sts_monitor.security import AuthContext, hash_api_key, now_utc, require_admin, require_analyst, require_api_key
 from sts_monitor.simulation import generate_simulated_observations
+from sts_monitor.corroboration import analyze_corroboration
+from sts_monitor.slop_detector import filter_slop, score_observation
+from sts_monitor.entity_graph import build_entity_graph
+from sts_monitor.narrative import build_narrative_timeline
+from sts_monitor.anomaly_detector import run_anomaly_detection
 
 
 class InvestigationCreate(BaseModel):
@@ -4289,4 +4294,370 @@ def dashboard_summary(_: None = Depends(require_api_key), session: Session = Dep
         "discovered_topics": session.scalar(select(func.count(DiscoveredTopicORM.id)).where(DiscoveredTopicORM.status == "new")) or 0,
         "collection_plans": session.scalar(select(func.count(CollectionPlanORM.id)).where(CollectionPlanORM.active.is_(True))) or 0,
         "latest_reports": latest_reports,
+    }
+
+
+# ── Corroboration endpoints ────────────────────────────────────────────
+
+
+class CorroborationRequest(BaseModel):
+    investigation_id: str
+    similarity_threshold: float = Field(default=0.25, ge=0.1, le=0.8)
+
+
+@app.post("/analysis/corroboration")
+def analyze_observation_corroboration(
+    payload: CorroborationRequest,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Analyze cross-source corroboration for an investigation's observations."""
+    investigation = session.get(InvestigationORM, payload.investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    rows = session.scalars(
+        select(ObservationORM)
+        .where(ObservationORM.investigation_id == payload.investigation_id)
+        .order_by(ObservationORM.captured_at.desc())
+        .limit(500)
+    ).all()
+
+    observations = [
+        {
+            "id": r.id,
+            "source": r.source,
+            "claim": r.claim,
+            "url": r.url,
+            "captured_at": r.captured_at,
+            "reliability_hint": r.reliability_hint,
+        }
+        for r in rows
+    ]
+
+    result = analyze_corroboration(observations, payload.similarity_threshold)
+
+    return {
+        "investigation_id": payload.investigation_id,
+        "total_claims": result.total_claims,
+        "well_corroborated": result.well_corroborated,
+        "partially_corroborated": result.partially_corroborated,
+        "single_source": result.single_source,
+        "contested": result.contested,
+        "overall_corroboration_rate": result.overall_corroboration_rate,
+        "scores": [
+            {
+                "claim_summary": s.claim_summary[:200],
+                "score": s.score,
+                "verdict": s.verdict,
+                "independent_sources": s.independent_sources,
+                "source_families": s.source_families,
+                "connector_types": s.connector_types,
+                "source_tiers": s.source_tiers,
+                "temporal_spread_hours": s.temporal_spread_hours,
+                "first_reported_by": s.first_reported_by,
+                "breakdown": s.breakdown,
+            }
+            for s in result.scores[:50]
+        ],
+    }
+
+
+# ── Slop / propaganda filter endpoints ─────────────────────────────────
+
+
+class SlopFilterRequest(BaseModel):
+    investigation_id: str
+    drop_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    flag_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
+
+
+@app.post("/analysis/slop-filter")
+def analyze_slop(
+    payload: SlopFilterRequest,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Analyze observations for slop, propaganda, engagement bait, and bot patterns."""
+    investigation = session.get(InvestigationORM, payload.investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    rows = session.scalars(
+        select(ObservationORM)
+        .where(ObservationORM.investigation_id == payload.investigation_id)
+        .order_by(ObservationORM.captured_at.desc())
+        .limit(500)
+    ).all()
+
+    observations = [
+        {
+            "id": r.id,
+            "source": r.source,
+            "claim": r.claim,
+            "url": r.url,
+            "captured_at": r.captured_at,
+            "reliability_hint": r.reliability_hint,
+        }
+        for r in rows
+    ]
+
+    result = filter_slop(observations, payload.drop_threshold, payload.flag_threshold)
+
+    return {
+        "investigation_id": payload.investigation_id,
+        "total": result.total,
+        "credible": result.credible,
+        "suspicious": result.suspicious,
+        "slop": result.slop,
+        "propaganda": result.propaganda,
+        "dropped_count": result.dropped_count,
+        "pattern_stats": result.pattern_stats,
+        "scores": [
+            {
+                "observation_id": s.observation_id,
+                "source": s.source,
+                "claim_preview": s.claim_preview,
+                "slop_score": s.slop_score,
+                "credibility_score": s.credibility_score,
+                "verdict": s.verdict,
+                "flags": s.flags,
+                "factor_scores": s.factor_scores,
+                "recommended_action": s.recommended_action,
+            }
+            for s in result.scores[:100]
+        ],
+    }
+
+
+# ── Entity relationship graph endpoints ────────────────────────────────
+
+
+class EntityGraphRequest(BaseModel):
+    investigation_id: str
+    min_mentions: int = Field(default=2, ge=1, le=50)
+    min_edge_weight: int = Field(default=2, ge=1, le=20)
+    max_nodes: int = Field(default=150, ge=10, le=500)
+
+
+@app.post("/analysis/entity-graph")
+def build_investigation_entity_graph(
+    payload: EntityGraphRequest,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Build an entity relationship graph for an investigation."""
+    investigation = session.get(InvestigationORM, payload.investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    rows = session.scalars(
+        select(ObservationORM)
+        .where(ObservationORM.investigation_id == payload.investigation_id)
+        .order_by(ObservationORM.captured_at.desc())
+        .limit(1000)
+    ).all()
+
+    observations = [
+        {
+            "claim": r.claim,
+            "source": r.source,
+            "url": r.url,
+            "captured_at": r.captured_at,
+            "reliability_hint": r.reliability_hint,
+            "investigation_id": r.investigation_id,
+        }
+        for r in rows
+    ]
+
+    graph = build_entity_graph(
+        observations,
+        min_mentions=payload.min_mentions,
+        min_edge_weight=payload.min_edge_weight,
+        max_nodes=payload.max_nodes,
+    )
+
+    return {
+        "investigation_id": payload.investigation_id,
+        **graph.to_dict(),
+    }
+
+
+# ── Narrative timeline endpoints ───────────────────────────────────────
+
+
+class NarrativeTimelineRequest(BaseModel):
+    investigation_id: str
+    window_minutes: int = Field(default=30, ge=5, le=360)
+
+
+@app.post("/analysis/narrative-timeline")
+def build_investigation_narrative(
+    payload: NarrativeTimelineRequest,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Build a narrative timeline for an investigation."""
+    investigation = session.get(InvestigationORM, payload.investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    rows = session.scalars(
+        select(ObservationORM)
+        .where(ObservationORM.investigation_id == payload.investigation_id)
+        .order_by(ObservationORM.captured_at.asc())
+        .limit(1000)
+    ).all()
+
+    observations = [
+        {
+            "id": r.id,
+            "claim": r.claim,
+            "source": r.source,
+            "url": r.url,
+            "captured_at": r.captured_at,
+            "reliability_hint": r.reliability_hint,
+        }
+        for r in rows
+    ]
+
+    timeline = build_narrative_timeline(
+        observations,
+        topic=investigation.topic,
+        investigation_id=payload.investigation_id,
+        window_minutes=payload.window_minutes,
+    )
+
+    return timeline.to_dict()
+
+
+# ── Anomaly detection endpoints ────────────────────────────────────────
+
+
+class AnomalyDetectionRequest(BaseModel):
+    investigation_id: str | None = None
+    detection_hours: int = Field(default=6, ge=1, le=72)
+    baseline_hours: int = Field(default=72, ge=12, le=720)
+    min_z_score: float = Field(default=2.0, ge=1.0, le=5.0)
+
+
+@app.post("/analysis/anomalies")
+def detect_anomalies(
+    payload: AnomalyDetectionRequest,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Detect anomalies and pattern breaks across observations."""
+    query = select(ObservationORM).order_by(ObservationORM.captured_at.desc()).limit(2000)
+    if payload.investigation_id:
+        investigation = session.get(InvestigationORM, payload.investigation_id)
+        if not investigation:
+            raise HTTPException(status_code=404, detail="Investigation not found")
+        query = query.where(ObservationORM.investigation_id == payload.investigation_id)
+
+    rows = session.scalars(query).all()
+
+    observations = [
+        {
+            "id": r.id,
+            "source": r.source,
+            "claim": r.claim,
+            "url": r.url,
+            "captured_at": r.captured_at,
+            "reliability_hint": r.reliability_hint,
+            "investigation_id": r.investigation_id,
+        }
+        for r in rows
+    ]
+
+    report = run_anomaly_detection(
+        observations,
+        detection_hours=payload.detection_hours,
+        baseline_hours=payload.baseline_hours,
+        min_z_score=payload.min_z_score,
+    )
+
+    return report.to_dict()
+
+
+# ── Combined intelligence analysis ─────────────────────────────────────
+
+
+@app.post("/analysis/full")
+def full_intelligence_analysis(
+    payload: CorroborationRequest,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Run full intelligence analysis: corroboration + slop filter + anomalies + narrative."""
+    investigation = session.get(InvestigationORM, payload.investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    rows = session.scalars(
+        select(ObservationORM)
+        .where(ObservationORM.investigation_id == payload.investigation_id)
+        .order_by(ObservationORM.captured_at.desc())
+        .limit(1000)
+    ).all()
+
+    observations = [
+        {
+            "id": r.id,
+            "source": r.source,
+            "claim": r.claim,
+            "url": r.url,
+            "captured_at": r.captured_at,
+            "reliability_hint": r.reliability_hint,
+            "investigation_id": r.investigation_id,
+        }
+        for r in rows
+    ]
+
+    # Run all analyses
+    corroboration = analyze_corroboration(observations, payload.similarity_threshold)
+    slop_result = filter_slop(observations)
+    anomalies = run_anomaly_detection(observations)
+    timeline = build_narrative_timeline(
+        observations,
+        topic=investigation.topic,
+        investigation_id=payload.investigation_id,
+    )
+    graph = build_entity_graph(observations)
+
+    return {
+        "investigation_id": payload.investigation_id,
+        "topic": investigation.topic,
+        "observation_count": len(observations),
+        "corroboration": {
+            "total_claims": corroboration.total_claims,
+            "well_corroborated": corroboration.well_corroborated,
+            "single_source": corroboration.single_source,
+            "rate": corroboration.overall_corroboration_rate,
+        },
+        "quality": {
+            "credible": slop_result.credible,
+            "suspicious": slop_result.suspicious,
+            "slop": slop_result.slop,
+            "propaganda": slop_result.propaganda,
+            "pattern_stats": slop_result.pattern_stats,
+        },
+        "anomalies": {
+            "total": anomalies.total_anomalies,
+            "by_severity": anomalies.by_severity,
+            "by_type": anomalies.by_type,
+        },
+        "narrative": {
+            "time_span_hours": timeline.time_span_hours,
+            "phases": timeline.phases,
+            "pivots": timeline.pivots,
+            "summary": timeline.summary,
+        },
+        "entity_graph": {
+            "nodes": graph.node_count,
+            "edges": graph.edge_count,
+            "communities": graph.communities,
+            "bridge_entities": graph.bridge_entities,
+            "top_entities": graph.top_entities[:5],
+        },
     }
