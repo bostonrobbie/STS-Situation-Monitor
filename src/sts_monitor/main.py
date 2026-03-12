@@ -10,8 +10,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import asyncio
+
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
@@ -20,14 +23,19 @@ from sqlalchemy.orm import Session
 
 from sts_monitor.config import settings
 from sts_monitor.discovery import build_discovery_summary
-from sts_monitor.connectors import RSSConnector, RedditConnector
+from sts_monitor.connectors import (
+    RSSConnector, RedditConnector, GDELTConnector, USGSEarthquakeConnector,
+    NASAFIRMSConnector, ACLEDConnector, NWSAlertConnector, FEMADisasterConnector,
+)
 from sts_monitor.database import Base, engine, get_session
 from sts_monitor.jobs import create_schedule, enqueue_job, process_job_batch, process_next_job, requeue_dead_letter, tick_schedules
 from sts_monitor.llm import LocalLLMClient
-from sts_monitor.models import APIKeyORM, AlertEventORM, AlertRuleORM, AuditLogORM, ClaimEvidenceORM, ClaimORM, FeedbackORM, IngestionRunORM, InvestigationORM, JobORM, JobScheduleORM, ObservationORM, ReportORM, ResearchSourceORM, SearchProfileORM
+from sts_monitor.models import APIKeyORM, AlertEventORM, AlertRuleORM, AuditLogORM, ClaimEvidenceORM, ClaimORM, ConvergenceZoneORM, DashboardConfigORM, FeedbackORM, GeoEventORM, IngestionRunORM, InvestigationORM, JobORM, JobScheduleORM, ObservationORM, ReportORM, ResearchSourceORM, SearchProfileORM
 from sts_monitor.online_tools import parse_csv_env, send_alert_webhook
 from sts_monitor.pipeline import Observation, SignalPipeline
 from sts_monitor.search import apply_context_boosts, build_query_plan, normalize_datetime, score_text, top_terms
+from sts_monitor.convergence import GeoPoint, detect_convergence
+from sts_monitor.event_bus import STSEvent, event_bus
 from sts_monitor.research import TrendingResearchScanner
 from sts_monitor.security import AuthContext, hash_api_key, now_utc, require_admin, require_analyst, require_api_key
 from sts_monitor.simulation import generate_simulated_observations
@@ -82,6 +90,56 @@ class TrendingResearchRequest(BaseModel):
     geo: str = Field(default="US", min_length=2, max_length=3)
     max_topics: int = Field(default=10, ge=1, le=50)
     per_topic_limit: int = Field(default=5, ge=1, le=20)
+
+
+class GDELTIngestRequest(BaseModel):
+    query: str | None = None
+    timespan: str = Field(default="3h", pattern=r"^\d+[hd]$")
+    max_records: int = Field(default=75, ge=1, le=250)
+    mode: str = Field(default="ArtList", pattern="^(ArtList|TimelineVol|TimelineSourceCountry)$")
+    source_country: str | None = None
+    source_lang: str | None = None
+
+
+class USGSIngestRequest(BaseModel):
+    query: str | None = None
+    min_magnitude: float = Field(default=4.0, ge=0.0, le=10.0)
+    lookback_hours: int = Field(default=24, ge=1, le=720)
+    max_events: int = Field(default=100, ge=1, le=500)
+    use_summary_feed: bool = False
+    summary_feed: str = Field(default="significant_hour", pattern="^(significant_hour|m4\\.5_day|m2\\.5_day|all_hour)$")
+
+
+class NASAFIRMSIngestRequest(BaseModel):
+    query: str | None = None
+    country_code: str | None = Field(default=None, min_length=3, max_length=3)
+    days: int = Field(default=1, ge=1, le=10)
+    min_confidence: str = Field(default="nominal", pattern="^(low|nominal|high)$")
+
+
+class ACLEDIngestRequest(BaseModel):
+    query: str | None = None
+    lookback_days: int = Field(default=7, ge=1, le=365)
+    limit: int = Field(default=100, ge=1, le=5000)
+    country: str | None = None
+    region: int | None = None
+    event_type: str | None = None
+
+
+class NWSIngestRequest(BaseModel):
+    query: str | None = None
+    severity_filter: str = Field(default="Extreme,Severe")
+    status: str = Field(default="actual", pattern="^(actual|exercise|system|test|draft)$")
+    urgency: str | None = None
+    area: str | None = Field(default=None, min_length=2, max_length=2)
+
+
+class FEMAIngestRequest(BaseModel):
+    query: str | None = None
+    lookback_days: int = Field(default=30, ge=1, le=365)
+    limit: int = Field(default=100, ge=1, le=1000)
+    state: str | None = Field(default=None, min_length=2, max_length=2)
+    declaration_type: str | None = Field(default=None, pattern="^(DR|EM|FM|FS)$")
 
 
 class RunRequest(BaseModel):
@@ -985,6 +1043,560 @@ def list_trending_topics(
     }
 
 
+
+
+def _persist_geo_events(
+    session: Session,
+    geo_events: list[dict],
+    investigation_id: str | None = None,
+) -> int:
+    """Persist geo_events from connector metadata into GeoEventORM rows."""
+    count = 0
+    for ge in geo_events:
+        event_time = ge.get("event_time")
+        if isinstance(event_time, str):
+            try:
+                event_time = datetime.fromisoformat(event_time.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                event_time = datetime.now(UTC)
+        elif not isinstance(event_time, datetime):
+            event_time = datetime.now(UTC)
+
+        row = GeoEventORM(
+            layer=ge.get("layer", "unknown"),
+            source_id=ge.get("source_id"),
+            title=str(ge.get("title", ""))[:500],
+            latitude=float(ge["latitude"]),
+            longitude=float(ge["longitude"]),
+            altitude=ge.get("altitude"),
+            magnitude=ge.get("magnitude"),
+            properties_json=json.dumps(ge.get("properties", {}), default=str),
+            event_time=event_time,
+            fetched_at=datetime.now(UTC),
+            expires_at=ge.get("expires_at"),
+            investigation_id=investigation_id,
+        )
+        session.add(row)
+        count += 1
+    return count
+
+
+def _ingest_with_geo_connector(
+    session: Session,
+    investigation_id: str,
+    connector_name: str,
+    connector_obj: Any,
+    query: str | None,
+    auth: AuthContext | None = None,
+) -> dict[str, Any]:
+    """Generic helper to run a geo-enabled connector and persist results."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    result = connector_obj.collect(query=query or investigation.seed_query)
+
+    for obs in result.observations:
+        session.add(
+            ObservationORM(
+                investigation_id=investigation_id,
+                source=obs.source,
+                claim=obs.claim,
+                url=obs.url,
+                captured_at=obs.captured_at,
+                reliability_hint=obs.reliability_hint,
+                connector_type=connector_name,
+            )
+        )
+
+    geo_events = result.metadata.get("geo_events", [])
+    geo_count = _persist_geo_events(session, geo_events, investigation_id=investigation_id)
+
+    _record_ingestion_run(
+        session=session,
+        investigation_id=investigation_id,
+        connector=connector_name,
+        ingested_count=len(result.observations),
+        failed_count=0,
+        status="success" if not result.metadata.get("error") else "partial",
+        detail={k: v for k, v in result.metadata.items() if k != "geo_events"},
+    )
+
+    if auth:
+        _record_audit(
+            session, actor=auth, action=f"ingest.{connector_name}",
+            resource_type="investigation", resource_id=investigation_id,
+            detail={"ingested": len(result.observations), "geo_events": geo_count},
+        )
+
+    session.commit()
+
+    # Publish SSE event
+    event_bus.publish_sync(STSEvent(
+        event_type="ingestion",
+        payload={
+            "connector": connector_name,
+            "investigation_id": investigation_id,
+            "ingested_count": len(result.observations),
+            "geo_events_count": geo_count,
+        },
+    ))
+
+    return {
+        "investigation_id": investigation_id,
+        "connector": connector_name,
+        "ingested_count": len(result.observations),
+        "geo_events_count": geo_count,
+        "error": result.metadata.get("error"),
+    }
+
+
+# ── GDELT Connector Endpoint ──────────────────────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/ingest/gdelt")
+def ingest_gdelt(
+    investigation_id: str,
+    payload: GDELTIngestRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    connector = GDELTConnector(
+        timespan=payload.timespan,
+        max_records=payload.max_records,
+        mode=payload.mode,
+        source_country=payload.source_country,
+        source_lang=payload.source_lang,
+        timeout_s=settings.gdelt_timeout_s,
+    )
+    return _ingest_with_geo_connector(
+        session, investigation_id, "gdelt", connector, payload.query, auth,
+    )
+
+
+# ── USGS Earthquake Connector Endpoint ────────────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/ingest/usgs")
+def ingest_usgs(
+    investigation_id: str,
+    payload: USGSIngestRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    connector = USGSEarthquakeConnector(
+        min_magnitude=payload.min_magnitude,
+        lookback_hours=payload.lookback_hours,
+        max_events=payload.max_events,
+        use_summary_feed=payload.use_summary_feed,
+        summary_feed=payload.summary_feed,
+        timeout_s=settings.usgs_timeout_s,
+    )
+    return _ingest_with_geo_connector(
+        session, investigation_id, "usgs", connector, payload.query, auth,
+    )
+
+
+# ── NASA FIRMS Fire Connector Endpoint ────────────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/ingest/nasa-firms")
+def ingest_nasa_firms(
+    investigation_id: str,
+    payload: NASAFIRMSIngestRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    if not settings.nasa_firms_map_key:
+        raise HTTPException(status_code=503, detail="NASA FIRMS MAP_KEY not configured")
+    connector = NASAFIRMSConnector(
+        map_key=settings.nasa_firms_map_key,
+        sensor=settings.nasa_firms_sensor,
+        country_code=payload.country_code,
+        days=payload.days,
+        min_confidence=payload.min_confidence,
+        timeout_s=settings.nasa_firms_timeout_s,
+    )
+    return _ingest_with_geo_connector(
+        session, investigation_id, "nasa_firms", connector, payload.query, auth,
+    )
+
+
+# ── ACLED Conflict Connector Endpoint ─────────────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/ingest/acled")
+def ingest_acled(
+    investigation_id: str,
+    payload: ACLEDIngestRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    if not settings.acled_api_key or not settings.acled_email:
+        raise HTTPException(status_code=503, detail="ACLED API key/email not configured")
+    connector = ACLEDConnector(
+        api_key=settings.acled_api_key,
+        email=settings.acled_email,
+        lookback_days=payload.lookback_days,
+        limit=payload.limit,
+        country=payload.country,
+        region=payload.region,
+        event_type=payload.event_type,
+        timeout_s=settings.acled_timeout_s,
+    )
+    return _ingest_with_geo_connector(
+        session, investigation_id, "acled", connector, payload.query, auth,
+    )
+
+
+# ── NWS Weather Alerts Connector Endpoint ─────────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/ingest/nws")
+def ingest_nws(
+    investigation_id: str,
+    payload: NWSIngestRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    connector = NWSAlertConnector(
+        severity_filter=payload.severity_filter,
+        status=payload.status,
+        urgency=payload.urgency,
+        area=payload.area,
+        timeout_s=settings.nws_timeout_s,
+    )
+    return _ingest_with_geo_connector(
+        session, investigation_id, "nws", connector, payload.query, auth,
+    )
+
+
+# ── FEMA Disaster Connector Endpoint ──────────────────────────────────
+
+
+@app.post("/investigations/{investigation_id}/ingest/fema")
+def ingest_fema(
+    investigation_id: str,
+    payload: FEMAIngestRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    connector = FEMADisasterConnector(
+        lookback_days=payload.lookback_days,
+        limit=payload.limit,
+        state=payload.state,
+        declaration_type=payload.declaration_type,
+        timeout_s=settings.fema_timeout_s,
+    )
+    return _ingest_with_geo_connector(
+        session, investigation_id, "fema", connector, payload.query, auth,
+    )
+
+
+# ── SSE Streaming Endpoint ────────────────────────────────────────────
+
+
+@app.get("/events/stream")
+async def sse_stream(request: Request, _: None = Depends(require_api_key)):
+    """Server-Sent Events stream for real-time updates."""
+    queue = event_bus.subscribe()
+
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield event.to_sse()
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            event_bus.unsubscribe(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── Geo Events API ────────────────────────────────────────────────────
+
+
+@app.get("/geo/events")
+def list_geo_events(
+    layer: str | None = None,
+    hours: int = 24,
+    limit: int = 500,
+    investigation_id: str | None = None,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Get recent geo events, optionally filtered by layer."""
+    cutoff = datetime.now(UTC) - timedelta(hours=max(1, min(hours, 720)))
+    q = select(GeoEventORM).where(GeoEventORM.event_time >= cutoff)
+    if layer:
+        q = q.where(GeoEventORM.layer == layer)
+    if investigation_id:
+        q = q.where(GeoEventORM.investigation_id == investigation_id)
+    q = q.order_by(GeoEventORM.event_time.desc()).limit(max(1, min(limit, 5000)))
+
+    rows = session.scalars(q).all()
+    return {
+        "count": len(rows),
+        "cutoff": cutoff.isoformat(),
+        "events": [
+            {
+                "id": r.id,
+                "layer": r.layer,
+                "source_id": r.source_id,
+                "title": r.title,
+                "latitude": r.latitude,
+                "longitude": r.longitude,
+                "altitude": r.altitude,
+                "magnitude": r.magnitude,
+                "properties": json.loads(r.properties_json),
+                "event_time": r.event_time.isoformat(),
+                "investigation_id": r.investigation_id,
+            }
+            for r in rows
+        ],
+    }
+
+
+@app.get("/geo/layers")
+def list_geo_layers(
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> list[dict[str, Any]]:
+    """List available geo layers with event counts."""
+    cutoff_24h = datetime.now(UTC) - timedelta(hours=24)
+    rows = session.execute(
+        select(GeoEventORM.layer, func.count(GeoEventORM.id))
+        .where(GeoEventORM.event_time >= cutoff_24h)
+        .group_by(GeoEventORM.layer)
+    ).all()
+    return [{"layer": layer, "event_count_24h": count} for layer, count in rows]
+
+
+@app.get("/geo/convergence")
+def detect_convergence_zones(
+    hours: int = 24,
+    radius_km: float = 50.0,
+    min_signal_types: int = 3,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Detect convergence zones where multiple signal types cluster geographically."""
+    cutoff = datetime.now(UTC) - timedelta(hours=max(1, min(hours, 720)))
+    rows = session.scalars(
+        select(GeoEventORM).where(GeoEventORM.event_time >= cutoff)
+    ).all()
+
+    points = [
+        GeoPoint(
+            latitude=r.latitude,
+            longitude=r.longitude,
+            layer=r.layer,
+            title=r.title,
+            event_time=r.event_time,
+            source_id=r.source_id or "",
+        )
+        for r in rows
+    ]
+
+    zones = detect_convergence(
+        points,
+        radius_km=radius_km,
+        min_signal_types=min_signal_types,
+        time_window_hours=hours,
+    )
+
+    # Persist detected zones
+    for zone in zones:
+        cz = ConvergenceZoneORM(
+            center_lat=zone.center_lat,
+            center_lon=zone.center_lon,
+            radius_km=zone.radius_km,
+            signal_count=zone.signal_count,
+            signal_types_json=json.dumps(zone.signal_types),
+            severity=zone.severity,
+            first_detected_at=zone.first_detected_at,
+            last_updated_at=zone.last_updated_at,
+        )
+        session.add(cz)
+
+    if zones:
+        session.commit()
+        event_bus.publish_sync(STSEvent(
+            event_type="convergence",
+            payload={"zones_detected": len(zones), "radius_km": radius_km},
+        ))
+
+    return {
+        "geo_events_analyzed": len(points),
+        "zones": [
+            {
+                "center_lat": z.center_lat,
+                "center_lon": z.center_lon,
+                "radius_km": z.radius_km,
+                "signal_count": z.signal_count,
+                "signal_types": z.signal_types,
+                "severity": z.severity,
+                "first_detected_at": z.first_detected_at.isoformat(),
+                "last_updated_at": z.last_updated_at.isoformat(),
+                "event_count": len(z.events),
+            }
+            for z in zones
+        ],
+    }
+
+
+# ── Enhanced Dashboard API ─────────────────────────────────────────────
+
+
+@app.get("/dashboard/map-data")
+def dashboard_map_data(
+    hours: int = 24,
+    layers: str | None = None,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """GeoJSON-like endpoint for the map dashboard."""
+    cutoff = datetime.now(UTC) - timedelta(hours=max(1, min(hours, 720)))
+    q = select(GeoEventORM).where(GeoEventORM.event_time >= cutoff)
+    if layers:
+        layer_list = [l.strip() for l in layers.split(",") if l.strip()]
+        if layer_list:
+            q = q.where(GeoEventORM.layer.in_(layer_list))
+    q = q.order_by(GeoEventORM.event_time.desc()).limit(2000)
+    rows = session.scalars(q).all()
+
+    features = []
+    for r in rows:
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [r.longitude, r.latitude]},
+            "properties": {
+                "id": r.id,
+                "layer": r.layer,
+                "title": r.title,
+                "magnitude": r.magnitude,
+                "event_time": r.event_time.isoformat(),
+                "source_id": r.source_id,
+                **json.loads(r.properties_json),
+            },
+        })
+
+    return {"type": "FeatureCollection", "features": features}
+
+
+@app.get("/dashboard/timeline")
+def dashboard_timeline(
+    hours: int = 48,
+    bucket_hours: int = 1,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Event counts bucketed by time for timeline visualization."""
+    cutoff = datetime.now(UTC) - timedelta(hours=max(1, min(hours, 720)))
+    rows = session.scalars(
+        select(GeoEventORM).where(GeoEventORM.event_time >= cutoff)
+    ).all()
+
+    buckets: dict[str, dict[str, int]] = {}
+    for r in rows:
+        bucket_key = r.event_time.replace(
+            minute=0, second=0, microsecond=0,
+            hour=(r.event_time.hour // bucket_hours) * bucket_hours,
+        ).isoformat()
+        if bucket_key not in buckets:
+            buckets[bucket_key] = {}
+        buckets[bucket_key][r.layer] = buckets[bucket_key].get(r.layer, 0) + 1
+
+    return {
+        "bucket_hours": bucket_hours,
+        "cutoff": cutoff.isoformat(),
+        "buckets": [
+            {"time": k, "layers": v, "total": sum(v.values())}
+            for k, v in sorted(buckets.items())
+        ],
+    }
+
+
+@app.get("/dashboard/live")
+def dashboard_live(
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Live dashboard data combining summary stats, recent events, and active zones."""
+    now = datetime.now(UTC)
+    cutoff_24h = now - timedelta(hours=24)
+
+    # Counts
+    investigation_count = session.scalar(select(func.count(InvestigationORM.id))) or 0
+    observation_count = session.scalar(select(func.count(ObservationORM.id))) or 0
+    geo_event_count = session.scalar(
+        select(func.count(GeoEventORM.id)).where(GeoEventORM.event_time >= cutoff_24h)
+    ) or 0
+
+    # Recent geo events
+    recent_geo = session.scalars(
+        select(GeoEventORM).where(GeoEventORM.event_time >= cutoff_24h)
+        .order_by(GeoEventORM.event_time.desc()).limit(20)
+    ).all()
+
+    # Active convergence zones
+    active_zones = session.scalars(
+        select(ConvergenceZoneORM).where(ConvergenceZoneORM.resolved_at.is_(None))
+        .order_by(ConvergenceZoneORM.last_updated_at.desc()).limit(10)
+    ).all()
+
+    # Layer breakdown
+    layer_counts = session.execute(
+        select(GeoEventORM.layer, func.count(GeoEventORM.id))
+        .where(GeoEventORM.event_time >= cutoff_24h)
+        .group_by(GeoEventORM.layer)
+    ).all()
+
+    # Recent alerts
+    recent_alerts = session.scalars(
+        select(AlertEventORM).order_by(AlertEventORM.triggered_at.desc()).limit(10)
+    ).all()
+
+    return {
+        "timestamp": now.isoformat(),
+        "investigations": investigation_count,
+        "observations_total": observation_count,
+        "geo_events_24h": geo_event_count,
+        "sse_subscribers": event_bus.subscriber_count,
+        "layers": {layer: count for layer, count in layer_counts},
+        "recent_geo_events": [
+            {
+                "id": r.id, "layer": r.layer, "title": r.title,
+                "latitude": r.latitude, "longitude": r.longitude,
+                "magnitude": r.magnitude, "event_time": r.event_time.isoformat(),
+            }
+            for r in recent_geo
+        ],
+        "convergence_zones": [
+            {
+                "id": z.id, "center_lat": z.center_lat, "center_lon": z.center_lon,
+                "severity": z.severity, "signal_count": z.signal_count,
+                "signal_types": json.loads(z.signal_types_json),
+                "last_updated_at": z.last_updated_at.isoformat(),
+            }
+            for z in active_zones
+        ],
+        "recent_alerts": [
+            {
+                "id": a.id, "severity": a.severity, "message": a.message,
+                "triggered_at": a.triggered_at.isoformat(),
+            }
+            for a in recent_alerts
+        ],
+    }
 
 
 @app.post("/research/sources")

@@ -34,6 +34,10 @@ class ObservationORM(Base):
     url: Mapped[str] = mapped_column(String(1200), nullable=False)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     reliability_hint: Mapped[float] = mapped_column(Float, default=0.5)
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    geo_source: Mapped[str] = mapped_column(String(30), default="")
+    connector_type: Mapped[str] = mapped_column(String(50), default="rss", index=True)
 
     investigation: Mapped[InvestigationORM] = relationship(back_populates="observations")
 
@@ -207,6 +211,56 @@ class AuditLogORM(Base):
     resource_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     detail_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+
+class GeoEventORM(Base):
+    __tablename__ = "geo_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    layer: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    source_id: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    altitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    magnitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    properties_json: Mapped[str] = mapped_column(Text, default="{}")
+    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    investigation_id: Mapped[str | None] = mapped_column(ForeignKey("investigations.id", ondelete="SET NULL"), nullable=True)
+
+
+class ConvergenceZoneORM(Base):
+    __tablename__ = "convergence_zones"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    center_lat: Mapped[float] = mapped_column(Float, nullable=False)
+    center_lon: Mapped[float] = mapped_column(Float, nullable=False)
+    radius_km: Mapped[float] = mapped_column(Float, default=50.0)
+    signal_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    signal_types_json: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), default="low", index=True)
+    first_detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    investigation_id: Mapped[str | None] = mapped_column(ForeignKey("investigations.id", ondelete="SET NULL"), nullable=True)
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+class DashboardConfigORM(Base):
+    __tablename__ = "dashboard_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    owner: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    layout_json: Mapped[str] = mapped_column(Text, default="{}")
+    active_layers_json: Mapped[str] = mapped_column(Text, default="[]")
+    map_center_lat: Mapped[float] = mapped_column(Float, default=20.0)
+    map_center_lon: Mapped[float] = mapped_column(Float, default=0.0)
+    map_zoom: Mapped[float] = mapped_column(Float, default=2.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 class SearchProfileORM(Base):
