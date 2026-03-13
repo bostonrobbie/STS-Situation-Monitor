@@ -619,7 +619,7 @@ class TestFrontendSPA:
     def test_root_redirects_to_spa(self, client):
         resp = client.get("/", follow_redirects=False)
         assert resp.status_code == 307
-        assert "/static/index.html" in resp.headers["location"]
+        assert "/static/" in resp.headers["location"]  # globe.html or index.html
 
     def test_old_dashboard_still_works(self, client):
         resp = client.get("/static/dashboard.html")

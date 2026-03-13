@@ -85,12 +85,17 @@
 <!-- Control Panel -->
 <div class="controls">
   <h2>STS Intelligence Globe</h2>
+  <div style="margin-bottom:8px;display:flex;gap:4px">
+    <a href="/static/index.html" style="font-size:10px;color:var(--accent);text-decoration:none;border:1px solid var(--accent);padding:2px 8px;border-radius:12px;">Dashboard</a>
+    <a href="/docs" style="font-size:10px;color:var(--text-secondary);text-decoration:none;border:1px solid var(--border);padding:2px 8px;border-radius:12px;">API</a>
+  </div>
 
   <div class="quick-filters">
     <div class="filter-btn active" onclick="toggleAllLayers(true)">All</div>
     <div class="filter-btn" onclick="filterMilitary()">Military</div>
     <div class="filter-btn" onclick="filterConflict()">Conflict</div>
     <div class="filter-btn" onclick="filterNatural()">Natural</div>
+    <div class="filter-btn" onclick="filterInvestigations()">Intel</div>
   </div>
 
   <h3>Data Layers</h3>
@@ -103,6 +108,9 @@
     <div class="stat-row"><span>Vessels Tracked</span><span class="stat-val" id="stat-vessels">0</span></div>
     <div class="stat-row"><span>Active Zones</span><span class="stat-val" id="stat-zones">0</span></div>
     <div class="stat-row"><span>Sources</span><span class="stat-val" id="stat-sources">0</span></div>
+    <div class="stat-row"><span>Investigations</span><span class="stat-val" id="stat-investigations">0</span></div>
+    <div class="stat-row"><span>Geo Observations</span><span class="stat-val" id="stat-obs">0</span></div>
+    <div class="stat-row"><span>Autopilot</span><span class="stat-val" id="stat-autopilot" style="color:#22c55e">--</span></div>
   </div>
 
   <h3>Privacy</h3>
@@ -156,12 +164,15 @@ const LAYER_COLORS = {
   aircraft: Cesium.Color.fromCssColorString('#ff6b6b'),
   maritime: Cesium.Color.fromCssColorString('#4ecdc4'),
   unknown: Cesium.Color.fromCssColorString('#9ca3af'),
+  investigation: Cesium.Color.fromCssColorString('#06d6a0'),
+  observation: Cesium.Color.fromCssColorString('#118ab2'),
 };
 
 const LAYER_CSS = {
   earthquake: '#ef4444', fire: '#f59e0b', conflict: '#a855f7',
   weather_alert: '#06b6d4', disaster: '#3b82f6', humanitarian: '#22c55e',
   aircraft: '#ff6b6b', maritime: '#4ecdc4', unknown: '#9ca3af',
+  investigation: '#06d6a0', observation: '#118ab2',
 };
 
 let viewer;
@@ -236,7 +247,55 @@ async function loadGlobeData() {
     updateGlobe(data);
   } catch(e) { console.warn('Failed to load globe data:', e); }
 
+  // Also load investigation observations with geo data
+  await loadInvestigationGeoData();
+
   updateStatusBar();
+}
+
+async function loadInvestigationGeoData() {
+  if (!activeLayers.has('investigation') && !activeLayers.has('observation')) return;
+  try {
+    const resp = await fetch(`${API_BASE}/investigations`, { headers: HEADERS });
+    const investigations = await resp.json();
+    let obsTotal = 0;
+
+    for (const inv of investigations.slice(0, 20)) {
+      // Add investigation marker if it has geo data (use first geo observation)
+      const obsResp = await fetch(`${API_BASE}/investigations/${inv.id}/observations?limit=200`, { headers: HEADERS });
+      const observations = await obsResp.json();
+
+      for (const obs of observations) {
+        if (!obs.latitude || !obs.longitude) continue;
+        if (!activeLayers.has('observation')) continue;
+
+        obsTotal++;
+        const color = LAYER_COLORS.observation;
+        const entity = viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(obs.longitude, obs.latitude),
+          point: {
+            pixelSize: 7,
+            color: color,
+            outlineColor: LAYER_COLORS.investigation.withAlpha(0.5),
+            outlineWidth: 1,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+          properties: {
+            layer: 'observation',
+            title: (obs.claim || '').substring(0, 200),
+            time: obs.captured_at || '',
+            source_id: obs.source || '',
+            details: { investigation: inv.topic, reliability: obs.reliability_hint, source: obs.source, connector: obs.connector_type },
+          },
+        });
+        allEntities.push({ entity, data: { ...obs, layer: 'observation', title: obs.claim } });
+      }
+    }
+    layerCounts['observation'] = obsTotal;
+    layerCounts['investigation'] = investigations.length;
+    renderLayerToggles();
+  } catch(e) { console.warn('Failed to load investigation geo data:', e); }
 }
 
 function updateGlobe(data) {
@@ -373,6 +432,11 @@ function filterNatural() {
   loadGlobeData();
 }
 
+function filterInvestigations() {
+  activeLayers = new Set(['investigation', 'observation', 'conflict', 'humanitarian']);
+  loadGlobeData();
+}
+
 // ── Click Info ────────────────────────────────────────────────────────
 
 function showEntityInfo(entity) {
@@ -444,6 +508,18 @@ function updateStatusBar() {
   document.getElementById('bar-aircraft').textContent = document.getElementById('stat-aircraft').textContent;
   document.getElementById('bar-vessels').textContent = document.getElementById('stat-vessels').textContent;
   document.getElementById('bar-time').textContent = new Date().toLocaleTimeString();
+  document.getElementById('stat-investigations').textContent = layerCounts.investigation || 0;
+  document.getElementById('stat-obs').textContent = layerCounts.observation || 0;
+
+  // Check autopilot status
+  fetch(`${API_BASE}/autopilot/status`, { headers: HEADERS })
+    .then(r => r.json())
+    .then(d => {
+      const el = document.getElementById('stat-autopilot');
+      if (d.running) { el.textContent = 'ON'; el.style.color = '#22c55e'; }
+      else { el.textContent = 'OFF'; el.style.color = '#ef4444'; }
+    })
+    .catch(() => { document.getElementById('stat-autopilot').textContent = '--'; });
 }
 
 async function checkPrivacy() {

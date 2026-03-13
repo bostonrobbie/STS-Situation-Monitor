@@ -53,6 +53,7 @@ from sts_monitor.slop_detector import filter_slop, score_observation
 from sts_monitor.entity_graph import build_entity_graph
 from sts_monitor.narrative import build_narrative_timeline
 from sts_monitor.anomaly_detector import run_anomaly_detection
+from sts_monitor.autopilot import AUTOPILOT_ENABLED, get_state as get_autopilot_state, start_autopilot, stop_autopilot
 
 
 class InvestigationCreate(BaseModel):
@@ -350,7 +351,12 @@ async def lifespan(_: FastAPI):
     global _scheduler_task
     Base.metadata.create_all(bind=engine)
     _scheduler_task = asyncio.create_task(_background_scheduler())
+    # Start autopilot if enabled
+    if AUTOPILOT_ENABLED:
+        start_autopilot()
     yield
+    # Shutdown autopilot
+    stop_autopilot()
     _scheduler_task.cancel()
     try:
         await _scheduler_task
@@ -395,7 +401,7 @@ llm_client = LocalLLMClient(
 def root_redirect():
     """Redirect root to dashboard."""
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/static/index.html")
+    return RedirectResponse(url="/static/globe.html")
 
 
 def _build_report_text(topic: str, result_summary: str, confidence: float, disputed_claims: list[str]) -> str:
@@ -5086,3 +5092,25 @@ def knowledge_graph_summary(
         "edge_count": kg.edge_count,
         "stats": kg.stats,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Autopilot endpoints
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/autopilot/status")
+def autopilot_status(_: AuthContext = Depends(require_api_key)) -> dict[str, Any]:
+    """Get current autopilot status and recent cycle logs."""
+    return get_autopilot_state().to_dict()
+
+
+@app.post("/autopilot/start")
+def autopilot_start(_: AuthContext = Depends(require_api_key)) -> dict[str, Any]:
+    """Start the autopilot background task."""
+    return start_autopilot()
+
+
+@app.post("/autopilot/stop")
+def autopilot_stop(_: AuthContext = Depends(require_api_key)) -> dict[str, Any]:
+    """Stop the autopilot background task."""
+    return stop_autopilot()
