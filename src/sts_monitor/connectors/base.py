@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 from sts_monitor.pipeline import Observation
 
@@ -10,6 +12,7 @@ from sts_monitor.pipeline import Observation
 class ConnectorResult:
     connector: str
     observations: list[Observation]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class Connector(Protocol):
