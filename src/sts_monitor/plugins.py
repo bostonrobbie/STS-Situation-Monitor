@@ -73,7 +73,10 @@ class PluginRegistry:
         loaded = 0
         try:
             eps = importlib.metadata.entry_points()
-            group = eps.get("sts_monitor.connectors", []) if isinstance(eps, dict) else eps.select(group="sts_monitor.connectors")
+            if hasattr(eps, "select"):
+                group = eps.select(group="sts_monitor.connectors")
+            else:
+                group = eps.get("sts_monitor.connectors", [])
             for ep in group:
                 try:
                     cls = ep.load()
