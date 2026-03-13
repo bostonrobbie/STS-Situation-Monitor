@@ -9,6 +9,7 @@
 <script src="https://unpkg.com/htm@3/dist/htm.umd.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
 <style>
 :root {
   --bg-primary: #0a0e17;
@@ -484,6 +485,228 @@ function SettingsPage() {
   </div>`;
 }
 
+// ── Knowledge Graph page ─────────────────────────────────────────────
+function KnowledgeGraphPage() {
+  const svgRef = useRef(null);
+  const [graphData, setGraphData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [filters, setFilters] = useState({ includeObs: false, minMentions: 2, maxEntities: 200 });
+  const simulationRef = useRef(null);
+
+  const NODE_COLORS = {
+    investigation: '#3b82f6',
+    entity: '#f59e0b',
+    story: '#22c55e',
+    claim: '#a855f7',
+    convergence_zone: '#ef4444',
+    observation: '#6b7280',
+  };
+
+  const loadGraph = useCallback(() => {
+    setLoading(true);
+    setSelectedNode(null);
+    api('/knowledge-graph', {
+      method: 'POST',
+      body: JSON.stringify({
+        include_observations: filters.includeObs,
+        min_entity_mentions: filters.minMentions,
+        max_entities: filters.maxEntities,
+      }),
+    }).then(data => {
+      setGraphData(data);
+      setLoading(false);
+    }).catch(e => { alert(e.message); setLoading(false); });
+  }, [filters]);
+
+  useEffect(() => { loadGraph(); }, []);
+
+  useEffect(() => {
+    if (!graphData || !svgRef.current) return;
+    const svg = d3.select(svgRef.current);
+    svg.selectAll('*').remove();
+
+    const width = svgRef.current.clientWidth || 900;
+    const height = svgRef.current.clientHeight || 600;
+
+    // Zoom behavior
+    const g = svg.append('g');
+    svg.call(d3.zoom().scaleExtent([0.1, 8]).on('zoom', (e) => g.attr('transform', e.transform)));
+
+    const nodes = graphData.nodes.map(n => ({ ...n }));
+    const nodeMap = {};
+    nodes.forEach(n => nodeMap[n.id] = n);
+
+    const links = graphData.edges.filter(e => nodeMap[e.source] && nodeMap[e.target]).map(e => ({
+      source: e.source, target: e.target, type: e.type, weight: e.weight || 1,
+    }));
+
+    // Force simulation
+    const sim = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links).id(d => d.id).distance(d => 80 / Math.sqrt(d.weight || 1)))
+      .force('charge', d3.forceManyBody().strength(-120))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('collision', d3.forceCollide().radius(d => nodeRadius(d) + 4));
+    simulationRef.current = sim;
+
+    function nodeRadius(d) {
+      if (d.type === 'investigation') return 16;
+      if (d.type === 'entity') return 6 + Math.min((d.mention_count || 1), 20) * 0.6;
+      if (d.type === 'story') return 8;
+      if (d.type === 'convergence_zone') return 12;
+      return 5;
+    }
+
+    // Edge type styles
+    const EDGE_DASH = { co_occurs: '4,2', contradicts: '2,2', overlaps: '6,3' };
+    const EDGE_COLOR = {
+      mentions: '#4b5563', part_of: '#374151', co_occurs: '#d97706',
+      corroborates: '#16a34a', contradicts: '#dc2626', overlaps: '#0891b2', links_to: '#7c3aed',
+    };
+
+    // Render edges
+    const link = g.append('g').selectAll('line').data(links).join('line')
+      .attr('stroke', d => EDGE_COLOR[d.type] || '#374151')
+      .attr('stroke-opacity', 0.5)
+      .attr('stroke-width', d => Math.min(Math.sqrt(d.weight), 4))
+      .attr('stroke-dasharray', d => EDGE_DASH[d.type] || null);
+
+    // Render nodes
+    const node = g.append('g').selectAll('g').data(nodes).join('g')
+      .attr('cursor', 'pointer')
+      .call(d3.drag()
+        .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+        .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+        .on('end', (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
+      )
+      .on('click', (e, d) => { e.stopPropagation(); setSelectedNode(d); });
+
+    node.append('circle')
+      .attr('r', d => nodeRadius(d))
+      .attr('fill', d => NODE_COLORS[d.type] || '#6b7280')
+      .attr('stroke', '#1a2332')
+      .attr('stroke-width', 1.5);
+
+    // Labels for important nodes
+    node.filter(d => d.type === 'investigation' || d.type === 'convergence_zone' || (d.type === 'entity' && (d.mention_count || 0) >= 4))
+      .append('text')
+      .text(d => d.label.length > 25 ? d.label.slice(0, 25) + '...' : d.label)
+      .attr('x', d => nodeRadius(d) + 4)
+      .attr('y', 3)
+      .attr('fill', '#9ca3af')
+      .attr('font-size', '10px')
+      .attr('pointer-events', 'none');
+
+    // Tick
+    sim.on('tick', () => {
+      link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+          .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+      node.attr('transform', d => 'translate(' + d.x + ',' + d.y + ')');
+    });
+
+    svg.on('click', () => setSelectedNode(null));
+
+    return () => sim.stop();
+  }, [graphData]);
+
+  return html`<div style="display:grid;grid-template-columns:1fr 320px;height:100%;overflow:hidden">
+    <div style="position:relative;overflow:hidden">
+      <div style="position:absolute;top:12px;left:12px;z-index:10;display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary" onClick=${loadGraph} disabled=${loading}>${loading ? 'Loading...' : 'Refresh Graph'}</button>
+        <label style="font-size:11px;display:flex;align-items:center;gap:4px;color:var(--text-secondary)">
+          <input type="checkbox" checked=${filters.includeObs} onChange=${e => setFilters({...filters, includeObs: e.target.checked})} /> Observations
+        </label>
+        <label style="font-size:11px;color:var(--text-secondary)">Min mentions:
+          <input type="number" min="1" max="20" value=${filters.minMentions} style="width:50px;padding:2px 6px"
+            onChange=${e => setFilters({...filters, minMentions: parseInt(e.target.value)||2})} />
+        </label>
+      </div>
+      ${graphData ? html`
+        <div style="position:absolute;bottom:12px;left:12px;z-index:10;display:flex;gap:12px;font-size:10px;background:rgba(10,14,23,0.85);padding:8px 12px;border-radius:6px;border:1px solid var(--border)">
+          ${Object.entries(NODE_COLORS).map(([type, color]) => html`
+            <span key=${type} style="display:flex;align-items:center;gap:4px">
+              <span style="width:10px;height:10px;border-radius:50%;background:${color};display:inline-block"></span>
+              ${type.replace('_', ' ')}
+            </span>
+          `)}
+        </div>
+        <div style="position:absolute;bottom:12px;right:332px;z-index:10;font-size:10px;background:rgba(10,14,23,0.85);padding:8px 12px;border-radius:6px;border:1px solid var(--border);color:var(--text-secondary)">
+          ${graphData.node_count} nodes | ${graphData.edge_count} edges
+          ${graphData.stats.cross_investigation_entities > 0 ? html` | <span style="color:var(--accent-amber)">${graphData.stats.cross_investigation_entities} cross-investigation links</span>` : null}
+        </div>
+      ` : null}
+      <svg ref=${svgRef} style="width:100%;height:100%;background:var(--bg-primary)"></svg>
+    </div>
+
+    <div style="background:var(--bg-secondary);border-left:1px solid var(--border);padding:12px;overflow-y:auto">
+      ${selectedNode ? html`
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">${selectedNode.label}</span>
+          </div>
+          <div style="margin-bottom:8px"><${Badge} type=${
+            selectedNode.type === 'investigation' ? 'blue' :
+            selectedNode.type === 'entity' ? 'amber' :
+            selectedNode.type === 'story' ? 'green' :
+            selectedNode.type === 'claim' ? 'purple' : 'red'
+          }>${selectedNode.type.replace('_', ' ')}<//></div>
+          <table style="font-size:11px;width:100%">
+            ${Object.entries(selectedNode).filter(([k]) => !['id','label','type','x','y','vx','vy','fx','fy','index'].includes(k)).map(([k, v]) => html`
+              <tr key=${k}><td style="color:var(--text-muted);padding:2px 8px 2px 0;vertical-align:top">${k}</td><td style="padding:2px 0;word-break:break-all">${typeof v === 'object' ? JSON.stringify(v) : String(v)}</td></tr>
+            `)}
+          </table>
+        </div>
+      ` : html`
+        <div class="panel-section"><h3>Knowledge Graph</h3></div>
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">
+          This graph shows how all your investigations, entities, stories, claims, and convergence zones connect together.
+        </p>
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">
+          Click any node to see its details. Drag nodes to rearrange. Scroll to zoom.
+        </p>
+      `}
+
+      ${graphData && graphData.stats ? html`
+        <div class="card" style="margin-top:12px">
+          <div class="card-header"><span class="card-title">Graph Stats</span></div>
+          <div style="font-size:12px">
+            ${Object.entries(graphData.stats.node_types || {}).map(([type, count]) => html`
+              <div key=${type} style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
+                <span style="display:flex;align-items:center;gap:6px">
+                  <span style="width:8px;height:8px;border-radius:50%;background:${NODE_COLORS[type] || '#6b7280'};display:inline-block"></span>
+                  ${type.replace('_', ' ')}
+                </span>
+                <strong>${count}</strong>
+              </div>
+            `)}
+            <div style="display:flex;justify-content:space-between;padding:3px 0;margin-top:4px">
+              <span style="color:var(--text-muted)">Total edges</span>
+              <strong>${graphData.edge_count}</strong>
+            </div>
+            ${graphData.stats.cross_investigation_entities > 0 ? html`
+              <div style="display:flex;justify-content:space-between;padding:3px 0;color:var(--accent-amber)">
+                <span>Cross-investigation entities</span>
+                <strong>${graphData.stats.cross_investigation_entities}</strong>
+              </div>
+            ` : null}
+          </div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-header"><span class="card-title">Edge Types</span></div>
+          <div style="font-size:12px">
+            ${Object.entries(graphData.stats.edge_types || {}).map(([type, count]) => html`
+              <div key=${type} style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
+                <span>${type.replace('_', ' ')}</span>
+                <strong>${count}</strong>
+              </div>
+            `)}
+          </div>
+        </div>
+      ` : null}
+    </div>
+  </div>`;
+}
+
 // ── App root ────────────────────────────────────────────────────────
 function App() {
   const [page, setPage] = useState('dashboard');
@@ -494,7 +717,7 @@ function App() {
     return () => clearInterval(check);
   }, []);
 
-  const pages = { dashboard: DashboardPage, investigations: InvestigationsPage, search: SearchPage, map: MapPage, reports: ReportsPage, settings: SettingsPage };
+  const pages = { dashboard: DashboardPage, investigations: InvestigationsPage, search: SearchPage, map: MapPage, graph: KnowledgeGraphPage, reports: ReportsPage, settings: SettingsPage };
   const PageComponent = pages[page] || DashboardPage;
 
   return html`<div class="app">

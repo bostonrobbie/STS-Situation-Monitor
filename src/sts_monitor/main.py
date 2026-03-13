@@ -5036,3 +5036,53 @@ def test_notification(
     )
     results = notify_all(notification)
     return {"channels": results, "configured": len(results)}
+
+
+# ── Knowledge Graph endpoints ────────────────────────────────────────
+
+from sts_monitor.knowledge_graph import build_knowledge_graph
+
+
+class KnowledgeGraphRequest(BaseModel):
+    investigation_ids: list[str] | None = Field(default=None, description="Limit to specific investigations (null = all)")
+    include_observations: bool = Field(default=False, description="Include individual observations as nodes")
+    max_entities: int = Field(default=200, ge=10, le=1000)
+    min_entity_mentions: int = Field(default=2, ge=1, le=50)
+    max_stories: int = Field(default=100, ge=10, le=500)
+
+
+@app.post("/knowledge-graph")
+def get_knowledge_graph(
+    payload: KnowledgeGraphRequest,
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Build a unified knowledge graph across investigations.
+
+    Returns a graph of entities, stories, claims, convergence zones, and
+    investigations with edges showing how they connect. Use this to see
+    the big picture across all your monitoring threads.
+    """
+    kg = build_knowledge_graph(
+        session=session,
+        investigation_ids=payload.investigation_ids,
+        include_observations=payload.include_observations,
+        max_entities=payload.max_entities,
+        min_entity_mentions=payload.min_entity_mentions,
+        max_stories=payload.max_stories,
+    )
+    return kg.to_dict()
+
+
+@app.get("/knowledge-graph/summary")
+def knowledge_graph_summary(
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Quick summary stats for the knowledge graph without full node/edge data."""
+    kg = build_knowledge_graph(session=session, max_entities=500, max_stories=200)
+    return {
+        "node_count": kg.node_count,
+        "edge_count": kg.edge_count,
+        "stats": kg.stats,
+    }

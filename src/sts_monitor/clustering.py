@@ -115,10 +115,21 @@ def cluster_observations(
         return []
 
     cutoff = datetime.now(UTC) - timedelta(hours=time_window_hours)
-    recent = [o for o in observations if o.captured_at >= cutoff]
+    recent = []
+    for o in observations:
+        ts = o.captured_at
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        if ts >= cutoff:
+            recent.append(o)
 
     if len(recent) < min_cluster_size:
         return []
+
+    # Normalize all timestamps to be timezone-aware (SQLite stores naive)
+    for o in recent:
+        if o.captured_at and o.captured_at.tzinfo is None:
+            o.captured_at = o.captured_at.replace(tzinfo=UTC)
 
     # Sort newest first
     recent.sort(key=lambda o: o.captured_at, reverse=True)
