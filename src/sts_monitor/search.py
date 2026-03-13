@@ -59,8 +59,7 @@ def score_text(*, text: str, plan: QueryPlan, base_reliability: float) -> float:
     tokens = set(TOKEN_RE.findall(content))
 
     if plan.exclude_terms:
-        content_tokens = set(TOKEN_RE.findall(content))
-        if plan.exclude_terms & content_tokens:
+        if plan.exclude_terms & tokens:
             return 0.0
 
     term_hits = len(plan.include_terms.intersection(tokens))
