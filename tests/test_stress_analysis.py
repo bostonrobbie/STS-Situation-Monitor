@@ -287,21 +287,18 @@ class TestPipelineExtremeReliability:
         assert result.accepted[0].reliability_hint == 1.0
 
     def test_nan_reliability(self):
-        """BUG FOUND: NaN reliability is silently converted to 1.0 (max confidence).
+        """NaN reliability is now correctly treated as 0.0 (minimum confidence).
 
-        Python's min(1.0, NaN) returns 1.0, so max(0.0, min(1.0, NaN)) = 1.0.
-        This means an observation with NaN reliability gets treated as maximally
-        reliable, which is the opposite of safe behavior. It should be treated
-        as 0.0 or flagged/dropped.
+        Previously, Python's min(1.0, NaN) returned 1.0, silently promoting
+        NaN-reliability observations to maximum confidence. Now fixed to default
+        NaN to 0.0.
         """
         pipe = SignalPipeline()
         obs = _obs(reliability=float('nan'))
         result = pipe.run([obs], "test")
-        # BUG: NaN becomes 1.0 through max(0.0, min(1.0, nan)) due to Python
-        # min/max NaN behavior. This is ACCEPTED with max reliability!
-        assert len(result.accepted) == 1  # Documents the bug
-        assert result.accepted[0].reliability_hint == 1.0  # NaN became 1.0!
-        # Correct behavior would be: dropped, or reliability set to 0.0
+        # NaN reliability is treated as 0.0 and dropped (below default min_reliability)
+        assert len(result.dropped) == 1
+        assert len(result.accepted) == 0
 
     def test_inf_reliability(self):
         """Infinity reliability should be clamped to 1.0."""
@@ -720,16 +717,10 @@ class TestNarrativeHuge:
     """Test narrative timeline with large inputs."""
 
     def test_1000_observations(self):
-        """BUG FOUND: _group_by_time_window has a sliding window bug.
+        """Fixed: _group_by_time_window now compares against group start time.
 
-        It compares each new observation to the LAST observation in the current
-        group rather than to the group's start time. When observations are evenly
-        spaced (e.g., 5 min apart), each consecutive pair is within the 30-min
-        window, so ALL observations collapse into a single group even if they
-        span days.
-
-        Here, 1000 observations 5 minutes apart (83+ hours total) collapse
-        into 1 timeline event.
+        1000 observations 5 minutes apart (83+ hours total) should produce
+        many timeline events, not collapse into a single one.
         """
         now = datetime.now(UTC)
         obs_list = [
@@ -742,12 +733,9 @@ class TestNarrativeHuge:
             for i in range(1000)
         ]
         tl = build_narrative_timeline(obs_list, topic="large event")
-        assert tl.total_events > 0
-        # BUG: All 1000 observations (spanning 83+ hours) collapse into 1 event
-        # because _group_by_time_window slides the window forward with each obs.
-        assert tl.total_events == 1  # Documents the bug
-        assert tl.time_span_hours == 0  # Single event = no time span
-        # Correct behavior: should produce many events across 83+ hours
+        # Should produce many events across 83+ hours (not collapse into 1)
+        assert tl.total_events > 10
+        assert tl.time_span_hours > 50
 
     def test_very_long_claim(self):
         long_claim = "major earthquake " * 2000
@@ -1058,14 +1046,13 @@ class TestCrossModuleBugs:
         assert not math.isnan(result.confidence)
 
     def test_confidence_with_only_nan_accepted(self):
-        """BUG FOUND: NaN reliability passes through even with min_reliability=0.0.
+        """NaN reliability is now correctly treated as 0.0.
 
-        Same root cause as test_nan_reliability: max(0.0, min(1.0, NaN)) = 1.0,
-        so NaN gets accepted with reliability 1.0 regardless of min_reliability.
+        With min_reliability=0.0, NaN→0.0 is accepted (0.0 >= 0.0).
         """
         pipe = SignalPipeline(min_reliability=0.0)
         obs = _obs(reliability=float('nan'))
         result = pipe.run([obs], "test")
-        # BUG: NaN reliability becomes 1.0 and is accepted
+        # NaN becomes 0.0, which passes min_reliability=0.0
         assert len(result.accepted) == 1
-        assert result.accepted[0].reliability_hint == 1.0
+        assert result.accepted[0].reliability_hint == 0.0

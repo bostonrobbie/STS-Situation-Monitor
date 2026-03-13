@@ -170,7 +170,7 @@ def _group_by_time_window(
     groups: list[list[dict[str, Any]]] = [[sorted_obs[0]]]
 
     for obs in sorted_obs[1:]:
-        last_time = _parse_time(groups[-1][-1].get("captured_at"))
+        last_time = _parse_time(groups[-1][0].get("captured_at"))
         curr_time = _parse_time(obs.get("captured_at"))
 
         if (curr_time - last_time).total_seconds() <= window_minutes * 60:

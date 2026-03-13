@@ -142,7 +142,8 @@ class SignalPipeline:
         dropped: list[Observation] = []
 
         for observation in deduplicated:
-            bounded_reliability = max(0.0, min(1.0, observation.reliability_hint))
+            raw_rel = observation.reliability_hint
+            bounded_reliability = 0.0 if (raw_rel != raw_rel) else max(0.0, min(1.0, raw_rel))
             adjusted = Observation(
                 source=observation.source,
                 claim=observation.claim,
