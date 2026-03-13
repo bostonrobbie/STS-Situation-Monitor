@@ -367,7 +367,7 @@ class ReportGenerator:
                     source_breakdown=self._format_source_breakdown(pipeline_result.accepted),
                 )
 
-                raw = self.llm.summarize(prompt)
+                raw = self.llm.summarize(prompt) or ""
                 # Parse JSON response
                 cleaned = raw.strip()
                 if cleaned.startswith("```"):
