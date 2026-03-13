@@ -100,6 +100,24 @@ class SignalPipeline:
                 accepted.append(adjusted)
             else:
                 dropped.append(adjusted)
+    def run(self, observations: Iterable[Observation], topic: str) -> PipelineResult:
+        deduplicated = self._deduplicate(observations)
+        accepted: list[Observation] = []
+        dropped: list[Observation] = []
+
+        for observation in deduplicated:
+            bounded_reliability = max(0.0, min(1.0, observation.reliability_hint))
+            adjusted = Observation(
+                source=observation.source,
+                claim=observation.claim,
+                url=observation.url,
+                captured_at=observation.captured_at,
+                reliability_hint=bounded_reliability,
+            )
+            if adjusted.reliability_hint >= self.min_reliability:
+                accepted.append(adjusted)
+            else:
+                dropped.append(adjusted)
         groups: dict[str, dict[str, object]] = {}
         for item in observations:
             normalized = self._claim_cluster_key(item.claim)

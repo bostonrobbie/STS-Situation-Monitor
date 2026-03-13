@@ -47,6 +47,15 @@ python scripts/generate_api_key.py  # paste into STS_AUTH_API_KEY in .env
 ./scripts/bootstrap.sh
 ```
 
+### 4) Run API
+```
+
+### 3) Bootstrap checks (recommended)
+
+```bash
+./scripts/bootstrap.sh
+```
+
 ### 3.5) Apply DB migrations
 
 ```bash
@@ -60,6 +69,7 @@ uvicorn sts_monitor.main:app --reload --port 8080
 ```
 
 ### 5) Optional local infra
+### 4) Optional local infra
 
 ```bash
 docker compose up -d
@@ -69,6 +79,17 @@ docker compose up -d
 
 - `GET /health` → service health.
 - `GET /system/preflight` → verify DB, local LLM connectivity/model availability, and workspace wiring.
+- `POST /investigations` → create an investigation topic.
+- `GET /investigations` → list investigations.
+- `POST /investigations/{id}/ingest/rss` → ingest observations from one or more RSS feeds.
+- `POST /investigations/{id}/ingest/simulated` → inject synthetic data to break-test the pipeline.
+- `GET /investigations/{id}/ingestion-runs` → inspect ingestion audit trail and connector failures.
+- `GET /investigations/{id}/observations` → list persisted observations for an investigation.
+- `POST /investigations/{id}/run` → run pipeline against persisted observations (optional local LLM summarization).
+- `POST /investigations/{id}/feedback` → store analyst feedback for iterative memory.
+- `GET /investigations/{id}/memory` → view accumulated feedback memory.
+- `GET /reports/{investigation_id}` → fetch latest report snapshot.
+- `GET /dashboard/summary` → aggregate counters and latest report summaries for UI widgets.
 - `POST /investigations` → create an investigation topic.
 - `GET /investigations` → list investigations.
 - `POST /investigations/{id}/ingest/rss` → ingest observations from one or more RSS feeds.
@@ -188,6 +209,7 @@ Optional report lineage gate can be enforced via `STS_ENFORCE_REPORT_LINEAGE_GAT
 
 ## Documentation
 
+See [`docs/architecture.md`](docs/architecture.md) for end-to-end design and security model, [`docs/blockers-and-privacy.md`](docs/blockers-and-privacy.md) for practical offline-LLM/internet integration risks, and [`docs/capability-failure-modes.md`](docs/capability-failure-modes.md) for capability-by-capability failure analysis. Use [`docs/offline-buildout-checklist.md`](docs/offline-buildout-checklist.md) for PC wiring and break-test execution, and [`docs/functional-vision-and-gaps.md`](docs/functional-vision-and-gaps.md) for per-function improvement roadmap.
 See [`docs/architecture.md`](docs/architecture.md) for end-to-end design and security model, [`docs/blockers-and-privacy.md`](docs/blockers-and-privacy.md) for practical offline-LLM/internet integration risks, and [`docs/capability-failure-modes.md`](docs/capability-failure-modes.md) for capability-by-capability failure analysis. Use [`docs/offline-buildout-checklist.md`](docs/offline-buildout-checklist.md) for PC wiring and break-test execution.
 See [`docs/architecture.md`](docs/architecture.md) for end-to-end design and security model, [`docs/blockers-and-privacy.md`](docs/blockers-and-privacy.md) for practical offline-LLM/internet integration risks, and [`docs/capability-failure-modes.md`](docs/capability-failure-modes.md) for capability-by-capability failure analysis. Use [`docs/offline-buildout-checklist.md`](docs/offline-buildout-checklist.md) for PC wiring and break-test execution, and [`docs/functional-vision-and-gaps.md`](docs/functional-vision-and-gaps.md) for per-function improvement roadmap. For evidence-first local model operation, adopt [`docs/local-llm-analyst-policy.md`](docs/local-llm-analyst-policy.md) with structured output from [`docs/local-llm-output-schema.json`](docs/local-llm-output-schema.json).
 
