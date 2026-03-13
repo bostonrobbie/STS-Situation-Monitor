@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from datetime import datetime, UTC
 from typing import Iterable
 
 
@@ -26,6 +27,7 @@ class PipelineResult:
 
 class SignalPipeline:
     """Prototype ranking/filtering pipeline with basic dedup and dispute detection."""
+    """Simple ranking/filtering pipeline for rapid prototyping."""
 
     contradiction_markers = ["false", "hoax", "debunked", "not true", "fabricated", "fake", "denied", "refuted"]
 
@@ -35,6 +37,8 @@ class SignalPipeline:
     @staticmethod
     def _normalize_claim(text: str) -> str:
         return " ".join(text.strip().lower().split())
+
+    contradiction_markers = ["false", "hoax", "debunked", "not true", "fabricated", "fake"]
 
     @classmethod
     def _is_contradiction(cls, text: str) -> bool:
@@ -63,6 +67,39 @@ class SignalPipeline:
         return list(by_key.values())
 
     def _find_disputed_claims(self, observations: Iterable[Observation]) -> list[str]:
+        groups: dict[str, dict[str, int]] = {}
+        for item in observations:
+            normalized = self._claim_cluster_key(item.claim)
+            signal = groups.setdefault(normalized, {"support": 0, "contradict": 0})
+            if self._is_contradiction(item.claim):
+                signal["contradict"] += 1
+            else:
+                signal["support"] += 1
+
+        disputed: list[str] = []
+        for claim, counts in groups.items():
+            if counts["support"] > 0 and counts["contradict"] > 0:
+                disputed.append(claim)
+        return disputed
+
+    def run(self, observations: Iterable[Observation], topic: str) -> PipelineResult:
+        deduplicated = self._deduplicate(observations)
+        accepted: list[Observation] = []
+        dropped: list[Observation] = []
+
+        for observation in deduplicated:
+            bounded_reliability = max(0.0, min(1.0, observation.reliability_hint))
+            adjusted = Observation(
+                source=observation.source,
+                claim=observation.claim,
+                url=observation.url,
+                captured_at=observation.captured_at,
+                reliability_hint=bounded_reliability,
+            )
+            if adjusted.reliability_hint >= self.min_reliability:
+                accepted.append(adjusted)
+            else:
+                dropped.append(adjusted)
         groups: dict[str, dict[str, object]] = {}
         for item in observations:
             normalized = self._claim_cluster_key(item.claim)
@@ -156,6 +193,10 @@ class SignalPipeline:
                 dropped.append(adjusted)
 
         disputed_claims = self._find_disputed_claims(deduplicated)
+        summary = (
+            f"Topic '{topic}': {len(accepted)} high-signal observations retained, "
+            f"{len(dropped)} filtered as low-confidence noise, "
+            f"{len(disputed_claims)} disputed claim cluster(s)."
         confidence = self._compute_confidence(accepted, disputed_claims)
         summary = (
             f"Topic '{topic}': {len(accepted)} high-signal observations retained, "

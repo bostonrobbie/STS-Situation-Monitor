@@ -14,6 +14,7 @@ class InvestigationORM(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     topic: Mapped[str] = mapped_column(String(300), nullable=False)
     seed_query: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     priority: Mapped[int] = mapped_column(Integer, default=50, index=True)
     owner: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(30), default="open", index=True)

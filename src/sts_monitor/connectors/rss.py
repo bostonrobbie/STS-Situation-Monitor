@@ -10,6 +10,19 @@ from sts_monitor.pipeline import Observation
 
 
 class RSSConnector:
+    """Collects observations from RSS/Atom feeds."""
+
+    name = "rss"
+
+    def __init__(self, feed_urls: list[str], per_feed_limit: int = 10) -> None:
+        self.feed_urls = feed_urls
+        self.per_feed_limit = per_feed_limit
+
+    def collect(self, query: str | None = None) -> ConnectorResult:
+        observations: list[Observation] = []
+
+        for url in self.feed_urls:
+            parsed = feedparser.parse(url)
     """Collects observations from RSS/Atom feeds with basic retry/backoff."""
 
     name = "rss"
@@ -71,6 +84,7 @@ class RSSConnector:
                     )
                 )
 
+        return ConnectorResult(connector=self.name, observations=observations)
         return ConnectorResult(
             connector=self.name,
             observations=observations,

@@ -7,6 +7,8 @@ A local-first **open-source intelligence (OSINT) situation monitor** designed to
 ## What this starter includes
 
 - A reference architecture for ingestion, enrichment, verification, and reporting.
+- A lightweight FastAPI service with investigation, RSS/simulated ingestion, persistent storage, offline-local-LLM preflight checks, feedback memory, and report scaffolding.
+- A lightweight FastAPI service with investigation and report scaffolding.
 - A lightweight FastAPI service with investigation lifecycle, RSS/simulated/trending ingestion, persistent storage, preflight checks, feedback memory, and report scaffolding.
 - A pluggable processing pipeline abstraction to support multiple sources.
 - Local deployment primitives (`docker-compose.yml`) for API, Postgres, Redis, and Qdrant.
@@ -66,6 +68,17 @@ docker compose up -d
 ## API endpoints (starter)
 
 - `GET /health` → service health.
+- `GET /system/preflight` → verify DB, local LLM connectivity/model availability, and workspace wiring.
+- `POST /investigations` → create an investigation topic.
+- `GET /investigations` → list investigations.
+- `POST /investigations/{id}/ingest/rss` → ingest observations from one or more RSS feeds.
+- `POST /investigations/{id}/ingest/simulated` → inject synthetic data to break-test the pipeline.
+- `GET /investigations/{id}/observations` → list persisted observations for an investigation.
+- `POST /investigations/{id}/run` → run pipeline against persisted observations (optional local LLM summarization).
+- `POST /investigations/{id}/feedback` → store analyst feedback for iterative memory.
+- `GET /investigations/{id}/memory` → view accumulated feedback memory.
+- `GET /reports/{investigation_id}` → fetch latest report snapshot.
+- `GET /dashboard/summary` → aggregate counters and latest report summaries for UI widgets.
 - `GET /system/preflight` → verify DB, local LLM connectivity/model availability + latency, workspace disk health, queue health, connector diagnostics, and readiness score.
 - `GET /system/online-tools` → inspect internet exposure config (public URL, CORS/trusted hosts, webhook setup).
 - `POST /investigations` → create an investigation topic.
@@ -175,6 +188,7 @@ Optional report lineage gate can be enforced via `STS_ENFORCE_REPORT_LINEAGE_GAT
 
 ## Documentation
 
+See [`docs/architecture.md`](docs/architecture.md) for end-to-end design and security model, [`docs/blockers-and-privacy.md`](docs/blockers-and-privacy.md) for practical offline-LLM/internet integration risks, and [`docs/capability-failure-modes.md`](docs/capability-failure-modes.md) for capability-by-capability failure analysis. Use [`docs/offline-buildout-checklist.md`](docs/offline-buildout-checklist.md) for PC wiring and break-test execution.
 See [`docs/architecture.md`](docs/architecture.md) for end-to-end design and security model, [`docs/blockers-and-privacy.md`](docs/blockers-and-privacy.md) for practical offline-LLM/internet integration risks, and [`docs/capability-failure-modes.md`](docs/capability-failure-modes.md) for capability-by-capability failure analysis. Use [`docs/offline-buildout-checklist.md`](docs/offline-buildout-checklist.md) for PC wiring and break-test execution, and [`docs/functional-vision-and-gaps.md`](docs/functional-vision-and-gaps.md) for per-function improvement roadmap. For evidence-first local model operation, adopt [`docs/local-llm-analyst-policy.md`](docs/local-llm-analyst-policy.md) with structured output from [`docs/local-llm-output-schema.json`](docs/local-llm-output-schema.json).
 
 
