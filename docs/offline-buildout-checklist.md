@@ -19,6 +19,13 @@
    - `STS_AUTH_API_KEY`
 2. Generate an API key: `python scripts/generate_api_key.py` and set `STS_AUTH_API_KEY`.
 3. Run `./scripts/bootstrap.sh`.
+4. Start STS API.
+2. Start STS API.
+3. Call `GET /system/preflight`.
+4. Confirm:
+   - `STS_AUTH_API_KEY`
+2. Generate an API key: `python scripts/generate_api_key.py` and set `STS_AUTH_API_KEY`.
+3. Run `./scripts/bootstrap.sh`.
 4. Run `alembic upgrade head`.
 5. Start STS API.
 5. Call `GET /system/preflight`.

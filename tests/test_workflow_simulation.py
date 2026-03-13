@@ -1,3 +1,5 @@
+from sts_monitor.tools.simulation_runner import run_full_workflow_simulation
+
 import pytest
 
 from sts_monitor.tools.simulation_runner import run_full_workflow_simulation
