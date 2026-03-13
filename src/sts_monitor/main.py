@@ -378,6 +378,10 @@ app.add_middleware(
 trusted_hosts = parse_csv_env(settings.trusted_hosts)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts or ["*"])
 
+# Rate limiting middleware
+from sts_monitor.rate_limit import RateLimitMiddleware
+app.add_middleware(RateLimitMiddleware)
+
 pipeline = SignalPipeline()
 llm_client = LocalLLMClient(
     base_url=settings.local_llm_url,
@@ -391,7 +395,7 @@ llm_client = LocalLLMClient(
 def root_redirect():
     """Redirect root to dashboard."""
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/static/dashboard.html")
+    return RedirectResponse(url="/static/index.html")
 
 
 def _build_report_text(topic: str, result_summary: str, confidence: float, disputed_claims: list[str]) -> str:
@@ -4817,3 +4821,218 @@ def full_intelligence_analysis(
             "top_entities": graph.top_entities[:5],
         },
     }
+
+
+# ── WebSocket endpoint ───────────────────────────────────────────────
+
+from fastapi import WebSocket
+from sts_monitor.websocket import websocket_endpoint as _ws_handler, ws_manager
+
+
+@app.websocket("/ws")
+async def ws_endpoint(websocket: WebSocket):
+    await _ws_handler(websocket)
+
+
+@app.get("/ws/status")
+def ws_status(_: None = Depends(require_api_key)) -> dict[str, Any]:
+    """Inspect WebSocket connection status."""
+    return {
+        "active_connections": ws_manager.active_count,
+        "connections": ws_manager.connections_info,
+    }
+
+
+# ── Export endpoints ─────────────────────────────────────────────────
+
+from sts_monitor.export import export_observations_csv, export_claims_csv, export_report_markdown, export_report_pdf_bytes
+
+
+@app.get("/export/{investigation_id}/observations.csv")
+def export_observations(
+    investigation_id: str,
+    source: str | None = None,
+    min_reliability: float | None = None,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Export observations as CSV."""
+    inv = session.get(InvestigationORM, investigation_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    filters = {}
+    if source:
+        filters["source"] = source
+    if min_reliability is not None:
+        filters["min_reliability"] = min_reliability
+    csv_data = export_observations_csv(session, investigation_id, filters or None)
+    return Response(content=csv_data, media_type="text/csv", headers={
+        "Content-Disposition": f'attachment; filename="observations_{investigation_id}.csv"'
+    })
+
+
+@app.get("/export/{investigation_id}/claims.csv")
+def export_claims(
+    investigation_id: str,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Export claims as CSV."""
+    inv = session.get(InvestigationORM, investigation_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    csv_data = export_claims_csv(session, investigation_id)
+    return Response(content=csv_data, media_type="text/csv", headers={
+        "Content-Disposition": f'attachment; filename="claims_{investigation_id}.csv"'
+    })
+
+
+@app.get("/export/{investigation_id}/report.md")
+def export_report_md(
+    investigation_id: str,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Export latest report as Markdown."""
+    inv = session.get(InvestigationORM, investigation_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    md = export_report_markdown(session, investigation_id)
+    if not md:
+        raise HTTPException(status_code=404, detail="No report found")
+    return Response(content=md, media_type="text/markdown", headers={
+        "Content-Disposition": f'attachment; filename="report_{investigation_id}.md"'
+    })
+
+
+@app.get("/export/{investigation_id}/report.pdf")
+def export_report_pdf(
+    investigation_id: str,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Export latest report as PDF."""
+    inv = session.get(InvestigationORM, investigation_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    pdf = export_report_pdf_bytes(session, investigation_id)
+    if not pdf:
+        raise HTTPException(status_code=404, detail="No report found")
+    return Response(content=pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="report_{investigation_id}.pdf"'
+    })
+
+
+# ── JWT auth endpoints ───────────────────────────────────────────────
+
+from sts_monitor.auth_jwt import hash_password, verify_password, create_token, decode_token, UserContext
+
+
+class UserRegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=60)
+    password: str = Field(min_length=8, max_length=128)
+    role: str = Field(default="analyst", pattern="^(admin|analyst|viewer)$")
+
+
+class UserLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+# Store user accounts in a simple JSON structure within the DB
+# We'll use the existing APIKeyORM table with a convention:
+# label = "user:<username>", key_hash = bcrypt(password), role = role
+
+
+@app.post("/auth/register")
+def register_user(
+    payload: UserRegisterRequest,
+    auth: AuthContext = Depends(require_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Register a new user account (admin only)."""
+    label = f"user:{payload.username}"
+    existing = session.scalars(
+        select(APIKeyORM).where(APIKeyORM.label == label)
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Username already exists")
+
+    user = APIKeyORM(
+        label=label,
+        key_hash=hash_password(payload.password),
+        role=payload.role,
+        active=True,
+    )
+    session.add(user)
+    session.commit()
+
+    return {"username": payload.username, "role": payload.role, "id": user.id}
+
+
+@app.post("/auth/login")
+def login_user(
+    payload: UserLoginRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Authenticate and receive a JWT token."""
+    label = f"user:{payload.username}"
+    user = session.scalars(
+        select(APIKeyORM).where(APIKeyORM.label == label).where(APIKeyORM.active.is_(True))
+    ).first()
+
+    if not user or not verify_password(payload.password, user.key_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    token = create_token(user.id, payload.username, user.role)
+    return {"token": token, "username": payload.username, "role": user.role}
+
+
+@app.get("/auth/me")
+def auth_me(
+    request: Request,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Get current user info from JWT token."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Bearer token required")
+    token_data = decode_token(auth_header[7:])
+    return {"user_id": token_data["sub"], "username": token_data["username"], "role": token_data["role"]}
+
+
+# ── Plugin endpoints ─────────────────────────────────────────────────
+
+from sts_monitor.plugins import plugin_registry
+
+
+@app.get("/plugins")
+def list_plugins(_: None = Depends(require_api_key)) -> dict[str, Any]:
+    """List all registered connector plugins."""
+    return {"plugins": plugin_registry.registered}
+
+
+@app.post("/plugins/discover")
+def discover_plugins(auth: AuthContext = Depends(require_admin)) -> dict[str, Any]:
+    """Trigger plugin discovery from entry points and plugin directory."""
+    counts = plugin_registry.discover_all()
+    return {"discovered": counts, "total_registered": len(plugin_registry.registered)}
+
+
+# ── Notification test endpoint ───────────────────────────────────────
+
+from sts_monitor.notifications import AlertNotification, notify_all
+
+
+@app.post("/notifications/test")
+def test_notification(
+    auth: AuthContext = Depends(require_admin),
+) -> dict[str, Any]:
+    """Send a test notification to all configured channels."""
+    notification = AlertNotification(
+        title="STS Monitor Test Notification",
+        message="This is a test notification from the STS Situation Monitor.",
+        severity="info",
+    )
+    results = notify_all(notification)
+    return {"channels": results, "configured": len(results)}

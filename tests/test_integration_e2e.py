@@ -24,8 +24,10 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(autouse=True)
-def _fresh_db():
-    """Reset the database for every test."""
+def _fresh_db(monkeypatch):
+    """Reset the database for every test and disable rate limiting."""
+    import sts_monitor.rate_limit as rl
+    monkeypatch.setattr(rl, "RATE_LIMIT_ENABLED", False)
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 

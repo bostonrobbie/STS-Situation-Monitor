@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STS Situation Monitor</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/htm@3/dist/htm.umd.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+:root {
+  --bg-primary: #0a0e17;
+  --bg-secondary: #111827;
+  --bg-card: #1a2332;
+  --bg-hover: #1f2d3d;
+  --border: #2a3a4e;
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --accent-blue: #3b82f6;
+  --accent-green: #22c55e;
+  --accent-red: #ef4444;
+  --accent-amber: #f59e0b;
+  --accent-purple: #a855f7;
+  --accent-cyan: #06b6d4;
+  --radius: 8px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg-primary); color: var(--text-primary); height: 100vh; overflow: hidden; }
+a { color: var(--accent-blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button { font-family: inherit; cursor: pointer; }
+input, select, textarea { font-family: inherit; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-size: 13px; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-blue); }
+
+/* Layout */
+.app { display: flex; flex-direction: column; height: 100vh; }
+.header { display: flex; align-items: center; justify-content: space-between; padding: 0 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); height: 48px; flex-shrink: 0; }
+.header h1 { font-size: 16px; font-weight: 700; letter-spacing: -0.5px; }
+.header h1 .accent { color: var(--accent-blue); }
+.header-right { display: flex; align-items: center; gap: 16px; font-size: 12px; }
+.nav { display: flex; gap: 2px; }
+.nav-btn { background: none; border: none; color: var(--text-secondary); padding: 6px 14px; font-size: 12px; font-weight: 600; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.15s; }
+.nav-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.nav-btn.active { background: var(--accent-blue); color: white; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); display: inline-block; animation: pulse 2s infinite; }
+.status-dot.disconnected { background: var(--accent-red); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* Main content */
+.main { flex: 1; overflow: hidden; }
+.page { height: 100%; overflow-y: auto; padding: 20px; }
+.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.page-header h2 { font-size: 20px; font-weight: 700; }
+
+/* Cards */
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.card-title { font-size: 14px; font-weight: 700; }
+
+/* Buttons */
+.btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); transition: all 0.15s; }
+.btn:hover { background: var(--bg-hover); }
+.btn-primary { background: var(--accent-blue); border-color: var(--accent-blue); color: white; }
+.btn-primary:hover { background: #2563eb; }
+.btn-danger { background: var(--accent-red); border-color: var(--accent-red); color: white; }
+.btn-sm { padding: 4px 10px; font-size: 11px; }
+
+/* Stats */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.stat-value { font-size: 28px; font-weight: 700; }
+.stat-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+
+/* Table */
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th { text-align: left; padding: 10px 12px; border-bottom: 2px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); font-weight: 600; }
+.table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.table tr:hover td { background: var(--bg-hover); }
+
+/* Badge */
+.badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.badge-blue { background: rgba(59,130,246,0.2); color: var(--accent-blue); }
+.badge-green { background: rgba(34,197,94,0.2); color: var(--accent-green); }
+.badge-red { background: rgba(239,68,68,0.2); color: var(--accent-red); }
+.badge-amber { background: rgba(245,158,11,0.2); color: var(--accent-amber); }
+.badge-purple { background: rgba(168,85,247,0.2); color: var(--accent-purple); }
+
+/* Map */
+.map-container { width: 100%; height: 100%; }
+#spa-map { width: 100%; height: 100%; }
+
+/* Feed */
+.feed-item { padding: 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.feed-item:hover { background: var(--bg-hover); }
+.feed-time { color: var(--text-muted); font-size: 10px; }
+.feed-source { font-weight: 600; color: var(--accent-cyan); }
+
+/* Modal */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; min-width: 400px; max-width: 600px; max-height: 80vh; overflow-y: auto; }
+.modal h3 { font-size: 18px; margin-bottom: 16px; }
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.form-group input, .form-group select, .form-group textarea { width: 100%; }
+.form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+
+/* Split layout for map page */
+.split-layout { display: grid; grid-template-columns: 340px 1fr 340px; height: 100%; }
+.side-panel { overflow-y: auto; background: var(--bg-secondary); border-right: 1px solid var(--border); padding: 12px; }
+.side-panel:last-child { border-right: none; border-left: 1px solid var(--border); }
+.panel-section { margin-bottom: 16px; }
+.panel-section h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary); margin-bottom: 8px; }
+
+/* Empty state */
+.empty { text-align: center; padding: 40px; color: var(--text-muted); }
+.empty p { margin-top: 8px; font-size: 13px; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Responsive */
+@media (max-width: 1200px) { .split-layout { grid-template-columns: 1fr; } .side-panel { display: none; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const { createElement: h, useState, useEffect, useRef, useCallback, Fragment } = React;
+const html = htm.bind(h);
+
+// ── API helper ──────────────────────────────────────────────────────
+const API_KEY = localStorage.getItem('sts_api_key') || 'change-me';
+const JWT_TOKEN = localStorage.getItem('sts_jwt_token') || '';
+
+function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', ...opts.headers };
+  const token = localStorage.getItem('sts_jwt_token');
+  if (token) {
+    headers['Authorization'] = 'Bearer ' + token;
+  }
+  headers['X-API-Key'] = localStorage.getItem('sts_api_key') || 'change-me';
+  return fetch(path, { ...opts, headers }).then(r => {
+    if (!r.ok) throw new Error(r.statusText);
+    const ct = r.headers.get('content-type') || '';
+    if (ct.includes('json')) return r.json();
+    return r.text();
+  });
+}
+
+// ── WebSocket ───────────────────────────────────────────────────────
+let ws = null;
+let wsListeners = [];
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/ws');
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      wsListeners.forEach(fn => fn(data));
+    } catch {}
+  };
+  ws.onclose = () => setTimeout(connectWS, 3000);
+  ws.onerror = () => ws.close();
+}
+function onWSMessage(fn) { wsListeners.push(fn); return () => { wsListeners = wsListeners.filter(f => f !== fn); }; }
+try { connectWS(); } catch {}
+
+// ── Shared components ───────────────────────────────────────────────
+function Modal({ title, onClose, children }) {
+  return html`<div class="modal-overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+    <div class="modal"><h3>${title}</h3>${children}</div>
+  </div>`;
+}
+
+function Badge({ type, children }) {
+  return html`<span class="badge badge-${type}">${children}</span>`;
+}
+
+function Loader() {
+  return html`<div class="empty"><p>Loading...</p></div>`;
+}
+
+// ── Dashboard page ──────────────────────────────────────────────────
+function DashboardPage() {
+  const [stats, setStats] = useState(null);
+  const [events, setEvents] = useState([]);
+
+  useEffect(() => {
+    api('/dashboard/summary').then(setStats).catch(() => {});
+    const unsub = onWSMessage(msg => {
+      setEvents(prev => [msg, ...prev].slice(0, 100));
+    });
+    return unsub;
+  }, []);
+
+  if (!stats) return html`<${Loader} />`;
+
+  return html`<div class="page">
+    <div class="page-header"><h2>Dashboard</h2></div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-value" style="color:var(--accent-blue)">${stats.total_investigations || 0}</div><div class="stat-label">Investigations</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:var(--accent-green)">${stats.total_observations || 0}</div><div class="stat-label">Observations</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:var(--accent-amber)">${stats.total_reports || 0}</div><div class="stat-label">Reports</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:var(--accent-red)">${stats.total_claims || 0}</div><div class="stat-label">Claims</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:var(--accent-purple)">${stats.total_entities || 0}</div><div class="stat-label">Entities</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:var(--accent-cyan)">${stats.total_alerts || 0}</div><div class="stat-label">Alerts</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Live Event Feed</span><span style="font-size:11px;color:var(--text-muted)">${events.length} events</span></div>
+      ${events.length === 0 ? html`<div class="empty"><p>No live events yet. Events will appear here as data flows in.</p></div>` : events.slice(0, 30).map((ev, i) => html`
+        <div class="feed-item" key=${i}>
+          <div style="display:flex;justify-content:space-between">
+            <span class="feed-source">${ev.type || 'event'}</span>
+            <span class="feed-time">${ev.ts ? new Date(ev.ts).toLocaleTimeString() : ''}</span>
+          </div>
+          <div style="margin-top:4px;color:var(--text-secondary)">${JSON.stringify(ev.data || {}).slice(0, 200)}</div>
+        </div>
+      `)}
+    </div>
+  </div>`;
+}
+
+// ── Investigations page ─────────────────────────────────────────────
+function InvestigationsPage() {
+  const [investigations, setInvestigations] = useState([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ topic: '', priority: 50, seed_query: '' });
+  const [selected, setSelected] = useState(null);
+
+  const load = () => api('/investigations').then(setInvestigations).catch(() => {});
+  useEffect(load, []);
+
+  const create = () => {
+    api('/investigations', { method: 'POST', body: JSON.stringify(form) })
+      .then(() => { setShowCreate(false); setForm({ topic: '', priority: 50, seed_query: '' }); load(); })
+      .catch(e => alert(e.message));
+  };
+
+  const ingestSimulated = (id) => {
+    api('/investigations/' + id + '/ingest/simulated', { method: 'POST', body: JSON.stringify({ batch_size: 20, include_noise: true }) })
+      .then(() => alert('Ingested simulated data'))
+      .catch(e => alert(e.message));
+  };
+
+  const runPipeline = (id) => {
+    api('/investigations/' + id + '/run', { method: 'POST', body: JSON.stringify({ use_llm: false }) })
+      .then(r => alert('Pipeline complete. Confidence: ' + (r.confidence * 100).toFixed(0) + '%'))
+      .catch(e => alert(e.message));
+  };
+
+  return html`<div class="page">
+    <div class="page-header">
+      <h2>Investigations</h2>
+      <button class="btn btn-primary" onClick=${() => setShowCreate(true)}>+ New Investigation</button>
+    </div>
+
+    <div class="card" style="padding:0">
+      <table class="table">
+        <thead><tr><th>Topic</th><th>Status</th><th>Priority</th><th>Owner</th><th>Created</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${investigations.map(inv => html`<tr key=${inv.id}>
+            <td><strong>${inv.topic}</strong><div style="font-size:10px;color:var(--text-muted)">${inv.id}</div></td>
+            <td><${Badge} type=${inv.status === 'open' ? 'green' : inv.status === 'monitoring' ? 'blue' : 'amber'}>${inv.status}<//></td>
+            <td>${inv.priority}</td>
+            <td>${inv.owner || '-'}</td>
+            <td style="font-size:11px">${new Date(inv.created_at).toLocaleDateString()}</td>
+            <td style="white-space:nowrap">
+              <button class="btn btn-sm" onClick=${() => ingestSimulated(inv.id)} title="Inject test data">Ingest</button>
+              <button class="btn btn-sm" onClick=${() => runPipeline(inv.id)} title="Run analysis pipeline" style="margin-left:4px">Run</button>
+              <a class="btn btn-sm" href="/export/${inv.id}/observations.csv" style="margin-left:4px;display:inline-block;text-decoration:none">CSV</a>
+              <a class="btn btn-sm" href="/export/${inv.id}/report.pdf" style="margin-left:4px;display:inline-block;text-decoration:none">PDF</a>
+            </td>
+          </tr>`)}
+        </tbody>
+      </table>
+      ${investigations.length === 0 ? html`<div class="empty"><p>No investigations yet. Create one to get started.</p></div>` : null}
+    </div>
+
+    ${showCreate ? html`<${Modal} title="Create Investigation" onClose=${() => setShowCreate(false)}>
+      <div class="form-group"><label>Topic</label><input value=${form.topic} onInput=${e => setForm({...form, topic: e.target.value})} placeholder="e.g. earthquake in Turkey" /></div>
+      <div class="form-group"><label>Seed Query (optional)</label><input value=${form.seed_query} onInput=${e => setForm({...form, seed_query: e.target.value})} /></div>
+      <div class="form-group"><label>Priority (1-100)</label><input type="number" min="1" max="100" value=${form.priority} onInput=${e => setForm({...form, priority: parseInt(e.target.value)||50})} /></div>
+      <div class="form-actions"><button class="btn" onClick=${() => setShowCreate(false)}>Cancel</button><button class="btn btn-primary" onClick=${create}>Create</button></div>
+    <//>` : null}
+  </div>`;
+}
+
+// ── Search page ─────────────────────────────────────────────────────
+function SearchPage() {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState(null);
+
+  const search = () => {
+    if (!query.trim()) return;
+    api('/search/query', { method: 'POST', body: JSON.stringify({ query, limit: 50 }) })
+      .then(setResults).catch(e => alert(e.message));
+  };
+
+  return html`<div class="page">
+    <div class="page-header"><h2>Search</h2></div>
+    <div style="display:flex;gap:8px;margin-bottom:20px">
+      <input style="flex:1" value=${query} onInput=${e => setQuery(e.target.value)} placeholder="Search across all investigations..." onKeyDown=${e => e.key === 'Enter' && search()} />
+      <button class="btn btn-primary" onClick=${search}>Search</button>
+    </div>
+    ${results ? html`
+      <div class="card">
+        <div class="card-header"><span class="card-title">Results (${(results.results || results.hits || []).length})</span></div>
+        ${(results.results || results.hits || []).map((r, i) => html`
+          <div class="feed-item" key=${i}>
+            <div style="display:flex;justify-content:space-between">
+              <span class="feed-source">${r.source || r.connector_type || 'unknown'}</span>
+              <span style="font-size:11px;color:var(--accent-amber)">${(r.score || r.reliability_hint || 0).toFixed(2)}</span>
+            </div>
+            <div style="margin-top:4px">${r.claim || r.text || JSON.stringify(r).slice(0, 200)}</div>
+            ${r.url ? html`<div style="margin-top:2px"><a href=${r.url} target="_blank" style="font-size:11px">${r.url.slice(0, 80)}</a></div>` : null}
+          </div>
+        `)}
+      </div>
+    ` : html`<div class="empty"><p>Enter a query to search across all investigations, observations, and claims.</p></div>`}
+  </div>`;
+}
+
+// ── Map page ────────────────────────────────────────────────────────
+function MapPage() {
+  const mapRef = useRef(null);
+  const mapInstance = useRef(null);
+  const [geoEvents, setGeoEvents] = useState([]);
+
+  useEffect(() => {
+    api('/dashboard/summary').then(d => {
+      setGeoEvents(d.recent_geo_events || []);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!mapRef.current || mapInstance.current) return;
+    mapInstance.current = new maplibregl.Map({
+      container: mapRef.current,
+      style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+      center: [0, 20],
+      zoom: 2,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!mapInstance.current) return;
+    geoEvents.forEach(ev => {
+      if (ev.latitude && ev.longitude) {
+        const el = document.createElement('div');
+        el.style.cssText = 'width:10px;height:10px;border-radius:50%;background:#ef4444;border:2px solid #fff;';
+        new maplibregl.Marker({ element: el })
+          .setLngLat([ev.longitude, ev.latitude])
+          .setPopup(new maplibregl.Popup().setHTML('<strong>' + (ev.title || 'Event') + '</strong>'))
+          .addTo(mapInstance.current);
+      }
+    });
+  }, [geoEvents]);
+
+  return html`<div class="map-container"><div id="spa-map" ref=${mapRef}></div></div>`;
+}
+
+// ── Reports page ────────────────────────────────────────────────────
+function ReportsPage() {
+  const [investigations, setInvestigations] = useState([]);
+  const [selectedReport, setSelectedReport] = useState(null);
+
+  useEffect(() => {
+    api('/investigations').then(setInvestigations).catch(() => {});
+  }, []);
+
+  const loadReport = (id) => {
+    api('/reports/' + id).then(setSelectedReport).catch(() => setSelectedReport({ error: 'No report available' }));
+  };
+
+  return html`<div class="page">
+    <div class="page-header"><h2>Reports</h2></div>
+    <div style="display:grid;grid-template-columns:300px 1fr;gap:16px;height:calc(100vh - 130px)">
+      <div style="overflow-y:auto">
+        ${investigations.map(inv => html`
+          <div class="card" key=${inv.id} style="cursor:pointer" onClick=${() => loadReport(inv.id)}>
+            <div style="font-weight:600;font-size:13px">${inv.topic}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${inv.status} | Priority ${inv.priority}</div>
+            <div style="margin-top:8px;display:flex;gap:4px">
+              <a class="btn btn-sm" href="/export/${inv.id}/report.md" onClick=${e => e.stopPropagation()}>MD</a>
+              <a class="btn btn-sm" href="/export/${inv.id}/report.pdf" onClick=${e => e.stopPropagation()}>PDF</a>
+              <a class="btn btn-sm" href="/export/${inv.id}/observations.csv" onClick=${e => e.stopPropagation()}>CSV</a>
+            </div>
+          </div>
+        `)}
+        ${investigations.length === 0 ? html`<div class="empty"><p>No investigations</p></div>` : null}
+      </div>
+      <div class="card" style="overflow-y:auto">
+        ${selectedReport ? selectedReport.error
+          ? html`<div class="empty"><p>${selectedReport.error}</p></div>`
+          : html`
+            <div class="card-header"><span class="card-title">Report</span><${Badge} type="green">${((selectedReport.confidence || 0) * 100).toFixed(0)}% confidence<//></div>
+            <div style="white-space:pre-wrap;font-size:13px;line-height:1.6">${selectedReport.summary || 'No summary available'}</div>
+            ${selectedReport.report_sections ? html`
+              <div style="margin-top:16px">
+                ${Object.entries(selectedReport.report_sections || {}).map(([k, v]) => html`
+                  <div key=${k} style="margin-bottom:12px">
+                    <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--text-secondary);margin-bottom:4px">${k}</div>
+                    <div style="font-size:13px;color:var(--text-primary)">${typeof v === 'string' ? v : JSON.stringify(v, null, 2)}</div>
+                  </div>
+                `)}
+              </div>
+            ` : null}
+          `
+        : html`<div class="empty"><p>Select an investigation to view its report</p></div>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── Settings page ───────────────────────────────────────────────────
+function SettingsPage() {
+  const [apiKey, setApiKey] = useState(localStorage.getItem('sts_api_key') || 'change-me');
+  const [preflight, setPreflight] = useState(null);
+  const [plugins, setPlugins] = useState(null);
+  const [wsStatus, setWsStatus] = useState(null);
+
+  useEffect(() => {
+    api('/system/preflight').then(setPreflight).catch(() => {});
+    api('/plugins').then(setPlugins).catch(() => {});
+    api('/ws/status').then(setWsStatus).catch(() => {});
+  }, []);
+
+  const saveKey = () => {
+    localStorage.setItem('sts_api_key', apiKey);
+    location.reload();
+  };
+
+  const discoverPlugins = () => {
+    api('/plugins/discover', { method: 'POST' })
+      .then(r => { alert('Discovered: ' + JSON.stringify(r.discovered)); api('/plugins').then(setPlugins).catch(() => {}); })
+      .catch(e => alert(e.message));
+  };
+
+  return html`<div class="page">
+    <div class="page-header"><h2>Settings</h2></div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Authentication</span></div>
+      <div class="form-group"><label>API Key</label><div style="display:flex;gap:8px"><input style="flex:1" type="password" value=${apiKey} onInput=${e => setApiKey(e.target.value)} /><button class="btn btn-primary" onClick=${saveKey}>Save</button></div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">System Preflight</span></div>
+      ${preflight ? html`<pre style="font-size:11px;overflow-x:auto;color:var(--text-secondary)">${JSON.stringify(preflight, null, 2)}</pre>` : html`<${Loader} />`}
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Plugins (${plugins ? Object.keys(plugins.plugins || {}).length : 0})</span>
+        <button class="btn btn-sm" onClick=${discoverPlugins}>Discover</button>
+      </div>
+      ${plugins && Object.keys(plugins.plugins || {}).length > 0 ? html`
+        <table class="table">
+          <thead><tr><th>Name</th><th>Class</th><th>Description</th></tr></thead>
+          <tbody>${Object.values(plugins.plugins).map(p => html`<tr key=${p.name}><td>${p.name}</td><td style="font-size:11px">${p.class}</td><td>${p.description}</td></tr>`)}</tbody>
+        </table>
+      ` : html`<div class="empty"><p>No plugins loaded. Place .py files in ~/.sts-monitor/plugins/ and click Discover.</p></div>`}
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">WebSocket</span></div>
+      ${wsStatus ? html`<p style="font-size:13px">Active connections: <strong>${wsStatus.active_connections}</strong></p>` : html`<${Loader} />`}
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">Links</span></div>
+      <div style="display:flex;gap:12px;font-size:13px">
+        <a href="/docs" target="_blank">API Docs (Swagger)</a>
+        <a href="/static/dashboard.html">Map Dashboard</a>
+        <a href="/static/globe.html">3D Globe</a>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── App root ────────────────────────────────────────────────────────
+function App() {
+  const [page, setPage] = useState('dashboard');
+  const [wsConnected, setWsConnected] = useState(false);
+
+  useEffect(() => {
+    const check = setInterval(() => setWsConnected(ws && ws.readyState === 1), 2000);
+    return () => clearInterval(check);
+  }, []);
+
+  const pages = { dashboard: DashboardPage, investigations: InvestigationsPage, search: SearchPage, map: MapPage, reports: ReportsPage, settings: SettingsPage };
+  const PageComponent = pages[page] || DashboardPage;
+
+  return html`<div class="app">
+    <div class="header">
+      <h1><span class="accent">STS</span> Situation Monitor</h1>
+      <div class="nav">
+        ${Object.keys(pages).map(p => html`<button key=${p} class="nav-btn ${page === p ? 'active' : ''}" onClick=${() => setPage(p)}>${p}</button>`)}
+      </div>
+      <div class="header-right">
+        <span><span class="status-dot ${wsConnected ? '' : 'disconnected'}"></span> ${wsConnected ? 'Live' : 'Offline'}</span>
+      </div>
+    </div>
+    <div class="main"><${PageComponent} /></div>
+  </div>`;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${App} />`);
+</script>
+</body>
+</html>

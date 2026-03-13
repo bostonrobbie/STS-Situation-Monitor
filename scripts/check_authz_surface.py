@@ -7,6 +7,8 @@ import sys
 
 MAIN = Path("src/sts_monitor/main.py")
 MUTATING = {"post", "patch", "delete", "put"}
+# Endpoints intentionally exempt from auth (login, public health, etc.)
+AUTH_EXEMPT_PATHS = {"/auth/login", "/health", "/system/preflight"}
 
 
 def _decorator_route(decorator: ast.AST) -> tuple[str, str] | None:
@@ -48,6 +50,8 @@ def main() -> int:
 
         fn_src = ast.get_source_segment(source, node) or ""
         for method, path in routes:
+            if path in AUTH_EXEMPT_PATHS:
+                continue
             if method in MUTATING:
                 if not any(_fn_has_guard(fn_src, token) for token in ("Depends(require_api_key)", "Depends(require_analyst)", "Depends(require_admin)")):
                     violations.append(f"{method.upper()} {path} missing auth dependency")
