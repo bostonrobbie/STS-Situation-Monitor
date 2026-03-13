@@ -339,6 +339,71 @@ def _run_cycle_for_investigation(inv_id: str, inv_topic: str, llm_ok: bool, seed
             except Exception as e:
                 log.warning("Alert evaluation failed for %s: %s", inv_id, e)
 
+            # 5. Geofence check
+            try:
+                from sts_monitor.geofence import check_observations_against_zones
+                geo_obs = [
+                    {"id": o.id, "source": o.source, "claim": o.claim,
+                     "latitude": o.latitude, "longitude": o.longitude}
+                    for o in session.query(ObservationORM).filter_by(
+                        investigation_id=inv_id
+                    ).all()
+                    if o.latitude is not None and o.longitude is not None
+                ]
+                if geo_obs:
+                    geo_alerts = check_observations_against_zones(geo_obs, investigation_id=inv_id)
+                    if geo_alerts:
+                        log.info("Geofence: %d alerts for %s", len(geo_alerts), inv_id)
+            except Exception as e:
+                log.debug("Geofence check failed for %s: %s", inv_id, e)
+
+            # 6. Semantic indexing (best-effort)
+            try:
+                from sts_monitor.semantic_index import index_observations_batch
+                recent = session.query(ObservationORM).filter_by(
+                    investigation_id=inv_id
+                ).order_by(ObservationORM.captured_at.desc()).limit(50).all()
+                idx_obs = [
+                    {"id": o.id, "investigation_id": inv_id, "source": o.source,
+                     "claim": o.claim, "url": o.url or "",
+                     "captured_at": o.captured_at.isoformat() if o.captured_at else ""}
+                    for o in recent if o.claim
+                ]
+                if idx_obs:
+                    index_observations_batch(idx_obs)
+            except Exception as e:
+                log.debug("Semantic indexing failed for %s: %s", inv_id, e)
+
+            # 7. Auto rabbit trail (if contradictions or interesting signals detected)
+            try:
+                if cycle_log.alerts_fired > 0 or cycle_log.entities_extracted > 5:
+                    from sts_monitor.rabbit_trail import run_rabbit_trail, store_trail_session
+                    all_obs_dicts = [
+                        {"source": o.source, "claim": o.claim, "captured_at": o.captured_at,
+                         "reliability_hint": o.reliability_hint}
+                        for o in session.query(ObservationORM).filter_by(
+                            investigation_id=inv_id
+                        ).order_by(ObservationORM.captured_at.desc()).limit(200).all()
+                    ]
+                    ent_list = list({
+                        em.normalized or em.entity_text
+                        for em in session.query(EntityMentionORM).filter_by(
+                            investigation_id=inv_id
+                        ).limit(100).all()
+                    })
+                    if all_obs_dicts and ent_list:
+                        trail = run_rabbit_trail(
+                            investigation_id=inv_id,
+                            topic=inv_topic,
+                            observations=all_obs_dicts,
+                            entities=ent_list,
+                            max_depth=5,
+                        )
+                        store_trail_session(trail)
+                        cycle_log.rabbit_trail = True
+            except Exception as e:
+                log.debug("Auto rabbit trail failed for %s: %s", inv_id, e)
+
     except Exception as e:
         cycle_log.error = str(e)
         log.error("Autopilot cycle failed for %s: %s", inv_id, e)

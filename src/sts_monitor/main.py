@@ -96,6 +96,15 @@ from sts_monitor.source_scoring import compute_source_scores, get_source_leaderb
 from sts_monitor.comparative import run_comparative_analysis
 from sts_monitor.rabbit_trail import run_rabbit_trail, store_trail_session, get_trail_session, list_trail_sessions
 from sts_monitor.alert_engine import evaluate_rules, get_default_rules, AlertRule
+from sts_monitor.cross_investigation import detect_cross_investigation_links
+from sts_monitor.claim_verification import verify_investigation_claims
+from sts_monitor.geofence import get_all_zones, add_zone, remove_zone, check_observations_against_zones, get_zone_activity_summary, GeoZone
+from sts_monitor.source_network import analyze_source_network
+from sts_monitor.pattern_matching import analyze_patterns
+from sts_monitor.intel_briefs import generate_intel_brief, brief_to_markdown
+from sts_monitor.webhook_ingest import normalize_webhook_payload, validate_webhook_signature
+from sts_monitor.multi_llm import get_router as get_llm_router
+from sts_monitor.semantic_index import semantic_search as _semantic_search_fn, index_observations_batch, get_semantic_health
 
 
 class InvestigationCreate(BaseModel):
@@ -6203,3 +6212,359 @@ def get_investigation_timeline(
             for e in timeline.events
         ],
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CROSS-INVESTIGATION LINKS
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/cross-investigation/links")
+def get_cross_investigation_links(
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Detect links across all investigations."""
+    report = detect_cross_investigation_links(session)
+    return report.to_dict()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CLAIM VERIFICATION
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.post("/investigations/{investigation_id}/verify-claims")
+def verify_claims(
+    investigation_id: str,
+    max_claims: int = 20,
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Run LLM-powered claim verification on an investigation's observations."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    observations = session.query(ObservationORM).filter_by(
+        investigation_id=investigation_id
+    ).order_by(ObservationORM.captured_at.desc()).limit(500).all()
+
+    obs_dicts = [
+        {"claim": o.claim, "source": o.source, "captured_at": o.captured_at.isoformat() if o.captured_at else None}
+        for o in observations
+    ]
+
+    llm_client = None
+    try:
+        from sts_monitor.llm import LocalLLMClient
+        llm_client = LocalLLMClient()
+    except Exception:
+        pass
+
+    report = verify_investigation_claims(
+        investigation_id=investigation_id,
+        topic=investigation.topic,
+        observations=obs_dicts,
+        llm_client=llm_client,
+        max_claims=max_claims,
+    )
+    return report.to_dict()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GEOFENCES
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/geofences")
+def list_geofences(
+    _: AuthContext = Depends(require_api_key),
+) -> dict[str, Any]:
+    """List all configured geofence zones."""
+    zones = get_all_zones()
+    return {
+        "total": len(zones),
+        "zones": [
+            {"name": z.name, "lat": z.center_lat, "lon": z.center_lon, "radius_km": z.radius_km, "category": z.category}
+            for z in zones
+        ],
+    }
+
+
+@app.post("/geofences")
+def create_geofence(
+    name: str,
+    lat: float,
+    lon: float,
+    radius_km: float = 50.0,
+    category: str = "custom",
+    _: AuthContext = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Add a custom geofence zone."""
+    zone = GeoZone(name=name, center_lat=lat, center_lon=lon, radius_km=radius_km, category=category)
+    add_zone(zone)
+    return {"status": "created", "zone": {"name": zone.name, "lat": zone.center_lat, "lon": zone.center_lon, "radius_km": zone.radius_km, "category": zone.category}}
+
+
+@app.delete("/geofences/{zone_name}")
+def delete_geofence(
+    zone_name: str,
+    _: AuthContext = Depends(require_api_key),
+) -> dict[str, str]:
+    """Remove a custom geofence zone."""
+    removed = remove_zone(zone_name)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Zone not found or is a builtin zone")
+    return {"status": "deleted", "zone": zone_name}
+
+
+@app.post("/investigations/{investigation_id}/geofence-check")
+def check_geofences(
+    investigation_id: str,
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Check investigation observations against all geofence zones."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    observations = session.query(ObservationORM).filter_by(
+        investigation_id=investigation_id
+    ).limit(1000).all()
+
+    obs_dicts = [
+        {"claim": o.claim, "source": o.source, "latitude": o.latitude, "longitude": o.longitude, "captured_at": o.captured_at}
+        for o in observations
+    ]
+
+    zones = get_all_zones()
+    geo_alerts = check_observations_against_zones(obs_dicts, zones, investigation_id)
+    summary = get_zone_activity_summary(obs_dicts)
+
+    return {
+        "investigation_id": investigation_id,
+        "alerts": [a.to_dict() for a in geo_alerts],
+        "zone_activity": summary,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SOURCE NETWORK
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/investigations/{investigation_id}/source-network")
+def get_source_network(
+    investigation_id: str,
+    co_report_window_hours: int = 6,
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Analyze source relationships for an investigation."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    observations = session.query(ObservationORM).filter_by(
+        investigation_id=investigation_id
+    ).limit(1000).all()
+
+    obs_dicts = [
+        {"claim": o.claim, "source": o.source, "captured_at": o.captured_at}
+        for o in observations
+    ]
+
+    report = analyze_source_network(obs_dicts, co_report_window_hours=co_report_window_hours)
+    return {
+        "investigation_id": investigation_id,
+        **report.to_dict(),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PATTERN MATCHING
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/investigations/{investigation_id}/pattern-match")
+def get_pattern_match(
+    investigation_id: str,
+    threshold: float = 0.3,
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Match investigation observations against known crisis patterns."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    observations = session.query(ObservationORM).filter_by(
+        investigation_id=investigation_id
+    ).limit(1000).all()
+
+    obs_dicts = [
+        {"claim": o.claim, "source": o.source, "captured_at": o.captured_at}
+        for o in observations
+    ]
+
+    result = analyze_patterns(obs_dicts, threshold=threshold)
+    return {
+        "investigation_id": investigation_id,
+        "current_signature": result.get("current_signature", {}),
+        "matches": result.get("matches", []),
+        "top_match": result.get("top_match"),
+        "escalation_score": result.get("escalation_score", 0),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# INTELLIGENCE BRIEFS
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.post("/investigations/{investigation_id}/intel-brief")
+def create_intel_brief(
+    investigation_id: str,
+    period: str = "Daily",
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Generate an intelligence brief for an investigation."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    observations = session.query(ObservationORM).filter_by(
+        investigation_id=investigation_id
+    ).order_by(ObservationORM.captured_at.desc()).limit(500).all()
+
+    obs_dicts = [
+        {"claim": o.claim, "source": o.source, "captured_at": o.captured_at, "latitude": o.latitude, "longitude": o.longitude}
+        for o in observations
+    ]
+
+    entities = session.query(EntityMentionORM).filter_by(
+        investigation_id=investigation_id
+    ).limit(500).all()
+
+    entity_dicts = [
+        {"entity_text": e.entity_text, "entity_type": e.entity_type, "normalized": e.normalized}
+        for e in entities
+    ]
+
+    llm_client = None
+    try:
+        from sts_monitor.llm import LocalLLMClient
+        llm_client = LocalLLMClient()
+    except Exception:
+        pass
+
+    brief = generate_intel_brief(
+        investigation_id=investigation_id,
+        topic=investigation.topic,
+        observations=obs_dicts,
+        entities=entity_dicts,
+        llm_client=llm_client,
+        period_label=period,
+    )
+    return brief
+
+
+@app.post("/investigations/{investigation_id}/intel-brief/markdown")
+def create_intel_brief_markdown(
+    investigation_id: str,
+    period: str = "Daily",
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, str]:
+    """Generate an intelligence brief in Markdown format."""
+    brief = create_intel_brief(investigation_id, period, _, session)
+    md = brief_to_markdown(brief)
+    return {"markdown": md}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WEBHOOK INGESTION
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.post("/investigations/{investigation_id}/webhook")
+def ingest_webhook(
+    investigation_id: str,
+    request_body: dict[str, Any],
+    x_webhook_signature: str | None = None,
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Ingest observations from external webhook."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    # Validate signature if configured
+    webhook_secret = settings.webhook_secret if hasattr(settings, "webhook_secret") else ""
+    if webhook_secret and x_webhook_signature:
+        import json
+        payload_bytes = json.dumps(request_body).encode()
+        if not validate_webhook_signature(payload_bytes, x_webhook_signature, webhook_secret):
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    normalized = normalize_webhook_payload(request_body, source_name=f"webhook:{investigation_id}")
+    created = []
+    for obs_data in normalized:
+        obs = ObservationORM(
+            investigation_id=investigation_id,
+            claim=obs_data.get("claim", ""),
+            source=obs_data.get("source", "webhook"),
+            captured_at=obs_data.get("captured_at"),
+            url=obs_data.get("url", ""),
+            latitude=obs_data.get("latitude"),
+            longitude=obs_data.get("longitude"),
+        )
+        session.add(obs)
+        created.append(obs_data.get("claim", "")[:100])
+
+    session.commit()
+    return {"status": "ingested", "observations_created": len(created), "claims": created}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SEMANTIC SEARCH
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/semantic-search")
+def run_semantic_search(
+    query: str,
+    limit: int = 10,
+    investigation_id: str | None = None,
+    _: AuthContext = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Search observations by semantic meaning using embeddings."""
+    results = _semantic_search_fn(query, limit=limit, investigation_id=investigation_id)
+    return {"query": query, "results": results, "count": len(results)}
+
+
+@app.get("/semantic-search/health")
+def semantic_health(
+    _: AuthContext = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Get health status of semantic search infrastructure."""
+    return get_semantic_health()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MULTI-LLM ROUTER
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/llm/status")
+def llm_router_status(
+    _: AuthContext = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Get LLM router status and available models."""
+    router = get_llm_router()
+    return router.get_status()
+
+
+@app.post("/llm/scan")
+def llm_scan_models(
+    _: AuthContext = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Trigger a model scan and return discovered models."""
+    router = get_llm_router()
+    models = router.scan_models()
+    return {"models_found": len(models), "models": [m.to_dict() for m in models]}

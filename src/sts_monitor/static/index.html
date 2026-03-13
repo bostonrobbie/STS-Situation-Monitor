@@ -292,6 +292,71 @@ function InvestigationsPage() {
   </div>`;
 }
 
+// ── Investigations page with dashboard link ─────────────────────────
+function InvestigationsPageWithDashboard({ onSelectInvestigation }) {
+  const [investigations, setInvestigations] = useState([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ topic: '', priority: 50, seed_query: '' });
+
+  const load = () => api('/investigations').then(setInvestigations).catch(() => {});
+  useEffect(load, []);
+
+  const create = () => {
+    api('/investigations', { method: 'POST', body: JSON.stringify(form) })
+      .then(() => { setShowCreate(false); setForm({ topic: '', priority: 50, seed_query: '' }); load(); })
+      .catch(e => alert(e.message));
+  };
+
+  const ingestSimulated = (id) => {
+    api('/investigations/' + id + '/ingest/simulated', { method: 'POST', body: JSON.stringify({ batch_size: 20, include_noise: true }) })
+      .then(() => alert('Ingested simulated data'))
+      .catch(e => alert(e.message));
+  };
+
+  const runPipeline = (id) => {
+    api('/investigations/' + id + '/run', { method: 'POST', body: JSON.stringify({ use_llm: false }) })
+      .then(r => alert('Pipeline complete. Confidence: ' + (r.confidence * 100).toFixed(0) + '%'))
+      .catch(e => alert(e.message));
+  };
+
+  return html`<div class="page">
+    <div class="page-header">
+      <h2>Investigations</h2>
+      <button class="btn btn-primary" onClick=${() => setShowCreate(true)}>+ New Investigation</button>
+    </div>
+
+    <div class="card" style="padding:0">
+      <table class="table">
+        <thead><tr><th>Topic</th><th>Status</th><th>Priority</th><th>Owner</th><th>Created</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${investigations.map(inv => html`<tr key=${inv.id}>
+            <td><strong style="cursor:pointer;color:var(--accent-blue)" onClick=${() => onSelectInvestigation(inv.id)}>${inv.topic}</strong><div style="font-size:10px;color:var(--text-muted)">${inv.id}</div></td>
+            <td><${Badge} type=${inv.status === 'open' ? 'green' : inv.status === 'monitoring' ? 'blue' : 'amber'}>${inv.status}<//></td>
+            <td>${inv.priority}</td>
+            <td>${inv.owner || '-'}</td>
+            <td style="font-size:11px">${new Date(inv.created_at).toLocaleDateString()}</td>
+            <td style="white-space:nowrap">
+              <button class="btn btn-sm btn-primary" onClick=${() => onSelectInvestigation(inv.id)} title="Open dashboard">Dashboard</button>
+              <button class="btn btn-sm" onClick=${() => ingestSimulated(inv.id)} title="Inject test data" style="margin-left:4px">Ingest</button>
+              <button class="btn btn-sm" onClick=${() => runPipeline(inv.id)} title="Run analysis pipeline" style="margin-left:4px">Run</button>
+              <a class="btn btn-sm" href="/export/${inv.id}/observations.csv" style="margin-left:4px;display:inline-block;text-decoration:none">CSV</a>
+              <a class="btn btn-sm" href="/export/${inv.id}/report.pdf" style="margin-left:4px;display:inline-block;text-decoration:none">PDF</a>
+            </td>
+          </tr>`)}
+        </tbody>
+      </table>
+      ${investigations.length === 0 ? html`<div class="empty"><p>No investigations yet. Create one to get started.</p></div>` : null}
+    </div>
+
+    ${showCreate ? html`<${Modal} title="Create Investigation" onClose=${() => setShowCreate(false)}>
+      <div class="form-group"><label>Topic</label><input value=${form.topic} onInput=${e => setForm({...form, topic: e.target.value})} placeholder="e.g. earthquake in Turkey" /></div>
+      <div class="form-group"><label>Seed Query (optional)</label><input value=${form.seed_query} onInput=${e => setForm({...form, seed_query: e.target.value})} /></div>
+      <div class="form-group"><label>Priority (1-100)</label><input type="number" min="1" max="100" value=${form.priority} onInput=${e => setForm({...form, priority: parseInt(e.target.value)||50})} /></div>
+      <div class="form-actions"><button class="btn" onClick=${() => setShowCreate(false)}>Cancel</button><button class="btn btn-primary" onClick=${create}>Create</button></div>
+    <//>` : null}
+  </div>`;
+}
+
 // ── Search page ─────────────────────────────────────────────────────
 function SearchPage() {
   const [query, setQuery] = useState('');
@@ -959,6 +1024,226 @@ function LoginPage() {
   </div>`;
 }
 
+// ── Per-Investigation Dashboard ──────────────────────────────────────
+function InvestigationDashboardPage({ investigationId, onBack }) {
+  const [inv, setInv] = useState(null);
+  const [tab, setTab] = useState('overview');
+  const [data, setData] = useState({});
+  const [loading, setLoading] = useState({});
+
+  useEffect(() => {
+    if (!investigationId) return;
+    api('/investigations/' + investigationId).then(setInv).catch(() => {});
+    loadTab('overview');
+  }, [investigationId]);
+
+  const loadTab = (t) => {
+    setTab(t);
+    if (data[t]) return;
+    setLoading(l => ({...l, [t]: true}));
+    const id = investigationId;
+    const endpoints = {
+      overview: '/investigations/' + id,
+      timeline: '/investigations/' + id + '/timeline',
+      sources: '/investigations/' + id + '/source-network',
+      patterns: '/investigations/' + id + '/pattern-match',
+      geofence: '/investigations/' + id + '/geofence-check',
+      claims: null,
+    };
+    const url = endpoints[t];
+    if (url) {
+      const method = (t === 'geofence' || t === 'claims') ? 'POST' : 'GET';
+      api(url, method !== 'GET' ? { method } : undefined)
+        .then(r => setData(d => ({...d, [t]: r})))
+        .catch(e => setData(d => ({...d, [t]: { error: e.message }})))
+        .finally(() => setLoading(l => ({...l, [t]: false})));
+    }
+  };
+
+  const runVerify = () => {
+    setLoading(l => ({...l, claims: true}));
+    api('/investigations/' + investigationId + '/verify-claims', { method: 'POST' })
+      .then(r => setData(d => ({...d, claims: r})))
+      .catch(e => setData(d => ({...d, claims: { error: e.message }})))
+      .finally(() => setLoading(l => ({...l, claims: false})));
+  };
+
+  const generateBrief = () => {
+    setLoading(l => ({...l, brief: true}));
+    api('/investigations/' + investigationId + '/intel-brief/markdown', { method: 'POST' })
+      .then(r => setData(d => ({...d, brief: r})))
+      .catch(e => setData(d => ({...d, brief: { error: e.message }})))
+      .finally(() => setLoading(l => ({...l, brief: false})));
+  };
+
+  if (!inv) return html`<div class="page"><p>Loading...</p></div>`;
+
+  const tabs = ['overview', 'timeline', 'sources', 'patterns', 'geofence', 'claims', 'brief'];
+
+  return html`<div class="page">
+    <div class="page-header">
+      <div>
+        <button class="btn btn-sm" onClick=${onBack} style="margin-right:12px">← Back</button>
+        <span style="font-size:20px;font-weight:700">${inv.topic || 'Investigation'}</span>
+        <span style="margin-left:8px"><${Badge} type=${inv.status === 'open' ? 'green' : 'blue'}>${inv.status}<//></span>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap">
+      ${tabs.map(t => html`<button key=${t} class="btn btn-sm ${tab === t ? 'btn-primary' : ''}" onClick=${() => { if (t === 'claims') runVerify(); else if (t === 'brief') generateBrief(); else loadTab(t); }}>${t}</button>`)}
+    </div>
+
+    ${tab === 'overview' && inv ? html`
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-value">${inv.observation_count || 0}</div><div class="stat-label">Observations</div></div>
+        <div class="stat-card"><div class="stat-value">${inv.entity_count || 0}</div><div class="stat-label">Entities</div></div>
+        <div class="stat-card"><div class="stat-value">${inv.story_count || 0}</div><div class="stat-label">Stories</div></div>
+        <div class="stat-card"><div class="stat-value">${inv.priority || 0}</div><div class="stat-label">Priority</div></div>
+      </div>
+      <div class="card"><div class="card-header"><span class="card-title">Details</span></div>
+        <p style="font-size:12px;color:var(--text-secondary)">ID: ${inv.id}</p>
+        <p style="font-size:12px;color:var(--text-secondary)">Owner: ${inv.owner || 'N/A'}</p>
+        <p style="font-size:12px;color:var(--text-secondary)">Created: ${inv.created_at ? new Date(inv.created_at).toLocaleString() : 'N/A'}</p>
+      </div>
+    ` : null}
+
+    ${tab === 'timeline' ? html`<div class="card">
+      <div class="card-header"><span class="card-title">Timeline</span></div>
+      ${loading.timeline ? html`<p>Loading timeline...</p>` :
+        data.timeline?.error ? html`<p style="color:var(--accent-red)">${data.timeline.error}</p>` :
+        data.timeline?.events ? html`
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">
+            ${data.timeline.total_events} events over ${data.timeline.time_span_hours?.toFixed(1) || '?'}h
+            ${data.timeline.pivots ? html` | <strong>${data.timeline.pivots}</strong> pivots` : ''}
+          </p>
+          <div style="border-left:2px solid var(--border);margin-left:12px;padding-left:16px">
+            ${(data.timeline.events || []).slice(0, 50).map(ev => html`
+              <div key=${ev.timestamp} style="margin-bottom:12px;position:relative">
+                <div style="position:absolute;left:-22px;top:4px;width:10px;height:10px;border-radius:50%;background:${ev.is_pivot ? 'var(--accent-red)' : 'var(--accent-blue)'}"></div>
+                <div style="font-size:10px;color:var(--text-muted)">${ev.timestamp ? new Date(ev.timestamp).toLocaleString() : ''} | ${ev.phase || ''}</div>
+                <div style="font-size:13px;font-weight:600">${ev.headline}</div>
+                <div style="font-size:11px;color:var(--text-secondary)">${ev.detail || ''}</div>
+                ${ev.sources?.length ? html`<div style="font-size:10px;color:var(--accent-cyan);margin-top:2px">${ev.sources.join(', ')}</div>` : null}
+              </div>
+            `)}
+          </div>
+        ` : html`<p>No timeline data</p>`
+      }
+    </div>` : null}
+
+    ${tab === 'sources' ? html`<div class="card">
+      <div class="card-header"><span class="card-title">Source Network</span></div>
+      ${loading.sources ? html`<p>Loading...</p>` :
+        data.sources?.error ? html`<p style="color:var(--accent-red)">${data.sources.error}</p>` : html`
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">${data.sources?.total_sources || 0} sources analyzed</p>
+          ${data.sources?.first_movers?.length ? html`
+            <h4 style="font-size:13px;margin-bottom:8px">First Movers</h4>
+            <table class="table"><thead><tr><th>Source</th><th>First Reports</th><th>Avg Lead (min)</th></tr></thead>
+              <tbody>${data.sources.first_movers.map(fm => html`<tr key=${fm.source}>
+                <td><strong>${fm.source}</strong></td><td>${fm.first_report_count}</td><td>${fm.avg_lead_minutes}</td>
+              </tr>`)}</tbody>
+            </table>
+          ` : null}
+          ${data.sources?.edges?.length ? html`
+            <h4 style="font-size:13px;margin:12px 0 8px">Relationships</h4>
+            <table class="table"><thead><tr><th>Source A</th><th>Source B</th><th>Type</th><th>Weight</th></tr></thead>
+              <tbody>${data.sources.edges.slice(0, 20).map((e, i) => html`<tr key=${i}>
+                <td>${e.source_a}</td><td>${e.source_b}</td><td><${Badge} type="purple">${e.relationship}<//></td><td>${e.weight}</td>
+              </tr>`)}</tbody>
+            </table>
+          ` : null}
+          ${data.sources?.coordinated_groups?.length ? html`
+            <h4 style="font-size:13px;margin:12px 0 8px">Coordinated Groups</h4>
+            ${data.sources.coordinated_groups.map((g, i) => html`<div key=${i} class="card" style="margin-bottom:8px;padding:8px"><${Badge} type="red">coordinated<//>  ${g.join(', ')}</div>`)}
+          ` : null}
+        `}
+    </div>` : null}
+
+    ${tab === 'patterns' ? html`<div class="card">
+      <div class="card-header"><span class="card-title">Pattern Matching</span></div>
+      ${loading.patterns ? html`<p>Loading...</p>` :
+        data.patterns?.error ? html`<p style="color:var(--accent-red)">${data.patterns.error}</p>` : html`
+          <div style="margin-bottom:12px">
+            <span style="font-size:12px;color:var(--text-secondary)">Escalation Score: </span>
+            <strong style="color:${(data.patterns?.escalation_score || 0) > 0.5 ? 'var(--accent-red)' : 'var(--accent-green)'}">${((data.patterns?.escalation_score || 0) * 100).toFixed(0)}%</strong>
+          </div>
+          ${data.patterns?.current_signature ? html`
+            <h4 style="font-size:13px;margin-bottom:8px">Current Signature</h4>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px">
+              ${Object.entries(data.patterns.current_signature).map(([k, v]) => html`
+                <div key=${k} class="stat-card" style="padding:8px"><div style="font-size:16px;font-weight:700">${typeof v === 'number' ? v.toFixed(2) : v}</div><div class="stat-label">${k}</div></div>
+              `)}
+            </div>
+          ` : null}
+          ${data.patterns?.matches?.length ? html`
+            <h4 style="font-size:13px;margin-bottom:8px">Pattern Matches</h4>
+            ${data.patterns.matches.map((m, i) => html`<div key=${i} class="card" style="padding:10px;margin-bottom:8px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <strong>${m.pattern}</strong>
+                <${Badge} type=${m.similarity > 0.6 ? 'red' : m.similarity > 0.4 ? 'amber' : 'blue'}>${(m.similarity * 100).toFixed(0)}% match<//>
+              </div>
+            </div>`)}
+          ` : html`<p style="font-size:12px;color:var(--text-secondary)">No known pattern matches above threshold</p>`}
+        `}
+    </div>` : null}
+
+    ${tab === 'geofence' ? html`<div class="card">
+      <div class="card-header"><span class="card-title">Geofence Alerts</span></div>
+      ${loading.geofence ? html`<p>Loading...</p>` :
+        data.geofence?.error ? html`<p style="color:var(--accent-red)">${data.geofence.error}</p>` : html`
+          ${data.geofence?.alerts?.length ? html`
+            <table class="table"><thead><tr><th>Zone</th><th>Observation</th><th>Distance</th><th>Severity</th></tr></thead>
+              <tbody>${data.geofence.alerts.slice(0, 30).map((a, i) => html`<tr key=${i}>
+                <td><strong>${a.zone}</strong></td>
+                <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.observation_claim}</td>
+                <td>${a.distance_km} km</td>
+                <td><${Badge} type=${a.severity === 'critical' ? 'red' : a.severity === 'warning' ? 'amber' : 'blue'}>${a.severity}<//></td>
+              </tr>`)}</tbody>
+            </table>
+          ` : html`<p style="font-size:12px;color:var(--text-secondary)">No geofence alerts — observations may lack coordinates</p>`}
+          ${data.geofence?.zone_activity ? html`
+            <h4 style="font-size:13px;margin:12px 0 8px">Zone Activity Summary</h4>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
+              ${Object.entries(data.geofence.zone_activity).map(([zone, count]) => html`
+                <div key=${zone} class="stat-card" style="padding:8px"><div class="stat-value" style="font-size:20px">${count}</div><div class="stat-label">${zone}</div></div>
+              `)}
+            </div>
+          ` : null}
+        `}
+    </div>` : null}
+
+    ${tab === 'claims' ? html`<div class="card">
+      <div class="card-header"><span class="card-title">Claim Verification</span></div>
+      ${loading.claims ? html`<p>Verifying claims (this may take a moment)...</p>` :
+        data.claims?.error ? html`<p style="color:var(--accent-red)">${data.claims.error}</p>` :
+        data.claims ? html`
+          <div class="stats-grid" style="margin-bottom:12px">
+            <div class="stat-card"><div class="stat-value">${data.claims.total_claims}</div><div class="stat-label">Total Claims</div></div>
+            <div class="stat-card"><div class="stat-value" style="color:var(--accent-green)">${data.claims.verified_count}</div><div class="stat-label">Verified</div></div>
+            <div class="stat-card"><div class="stat-value" style="color:var(--accent-red)">${data.claims.disputed_count}</div><div class="stat-label">Disputed</div></div>
+            <div class="stat-card"><div class="stat-value" style="color:var(--accent-amber)">${data.claims.unverified_count}</div><div class="stat-label">Unverified</div></div>
+          </div>
+          <table class="table"><thead><tr><th>Claim</th><th>Verdict</th><th>Confidence</th><th>Reasoning</th></tr></thead>
+            <tbody>${(data.claims.verdicts || []).map((v, i) => html`<tr key=${i}>
+              <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${v.claim}</td>
+              <td><${Badge} type=${v.verdict === 'likely_true' ? 'green' : v.verdict === 'likely_false' || v.verdict === 'disputed' ? 'red' : 'amber'}>${v.verdict}<//></td>
+              <td>${(v.confidence * 100).toFixed(0)}%</td>
+              <td style="font-size:11px;color:var(--text-secondary);max-width:200px">${v.reasoning || ''}</td>
+            </tr>`)}</tbody>
+          </table>
+        ` : html`<p>Click to run claim verification</p>`}
+    </div>` : null}
+
+    ${tab === 'brief' ? html`<div class="card">
+      <div class="card-header"><span class="card-title">Intelligence Brief</span></div>
+      ${loading.brief ? html`<p>Generating brief...</p>` :
+        data.brief?.error ? html`<p style="color:var(--accent-red)">${data.brief.error}</p>` :
+        data.brief?.markdown ? html`<pre style="white-space:pre-wrap;font-size:12px;line-height:1.6;font-family:inherit">${data.brief.markdown}</pre>` :
+        html`<p style="font-size:12px;color:var(--text-secondary)">Click the Brief tab to generate</p>`}
+    </div>` : null}
+  </div>`;
+}
+
 // ── App root ────────────────────────────────────────────────────────
 function App() {
   const [page, setPage] = useState('dashboard');
@@ -969,8 +1254,31 @@ function App() {
     return () => clearInterval(check);
   }, []);
 
+  const [selectedInvestigation, setSelectedInvestigation] = useState(null);
   const pages = { dashboard: DashboardPage, investigations: InvestigationsPage, templates: TemplatesPage, timeline: TimelinePage, comparative: ComparativePage, search: SearchPage, map: MapPage, graph: KnowledgeGraphPage, reports: ReportsPage, auth: LoginPage, settings: SettingsPage };
+
+  // If an investigation is selected, show its dashboard
+  if (selectedInvestigation) {
+    return html`<div class="app">
+      <div class="header">
+        <h1><span class="accent">STS</span> Situation Monitor</h1>
+        <div class="nav">
+          <button class="nav-btn active">investigation</button>
+        </div>
+        <div class="header-right">
+          <span><span class="status-dot ${wsConnected ? '' : 'disconnected'}"></span> ${wsConnected ? 'Live' : 'Offline'}</span>
+        </div>
+      </div>
+      <div class="main"><${InvestigationDashboardPage} investigationId=${selectedInvestigation} onBack=${() => setSelectedInvestigation(null)} /></div>
+    </div>`;
+  }
+
   const PageComponent = pages[page] || DashboardPage;
+
+  // Wrap InvestigationsPage to pass the selection handler
+  const WrappedPage = page === 'investigations'
+    ? () => html`<${InvestigationsPageWithDashboard} onSelectInvestigation=${setSelectedInvestigation} />`
+    : PageComponent;
 
   return html`<div class="app">
     <div class="header">
@@ -982,7 +1290,7 @@ function App() {
         <span><span class="status-dot ${wsConnected ? '' : 'disconnected'}"></span> ${wsConnected ? 'Live' : 'Offline'}</span>
       </div>
     </div>
-    <div class="main"><${PageComponent} /></div>
+    <div class="main"><${WrappedPage} /></div>
   </div>`;
 }
 
