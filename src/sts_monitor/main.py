@@ -940,6 +940,7 @@ def ingest_rss(
         detail=result.metadata,
     )
 
+    _record_audit(session, actor=auth, action="ingest.rss", resource_type="investigation", resource_id=investigation_id, detail={"ingested": len(result.observations), "failed_feeds": failed})
     session.commit()
     stored_count = session.scalar(select(func.count(ObservationORM.id)).where(ObservationORM.investigation_id == investigation_id))
 
@@ -1216,10 +1217,10 @@ def start_research_agent(
     _: None = Depends(require_api_key),
 ) -> dict[str, Any]:
     """Launch an autonomous research session (runs in background thread)."""
-    agent = _get_or_create_agent()
+    agent = _get_research_agent()
     session_id = str(uuid4())
 
-    # Override agent settings from request
+    # Apply per-request settings to a fresh agent instance
     if body.max_iterations:
         agent.max_iterations = body.max_iterations
     if body.nitter_categories:
@@ -1830,7 +1831,7 @@ def _ingest_with_geo_connector(
     if not investigation:
         raise HTTPException(status_code=404, detail="Investigation not found")
 
-    result = connector_obj.collect(query=query or investigation.seed_query)
+    result = connector_obj.collect(query=query or investigation.seed_query or investigation.topic)
 
     # Deduplicate: skip observations whose URL already exists for this investigation
     existing_urls: set[str] = set()
@@ -3987,12 +3988,21 @@ def get_report(
 
     accepted = json.loads(report.accepted_json)
     dropped = json.loads(report.dropped_json)
-    report_sections = _build_report_sections(
-        topic=investigation.topic,
-        accepted=accepted,
-        dropped=dropped,
-        disputed_claims=[],
-    )
+    # Reports from /reports/generate store a dict (full report), not a list of observations
+    if isinstance(accepted, dict):
+        report_sections = {
+            "likely_true": accepted.get("key_findings", [])[:5],
+            "disputed": [],
+            "unknown": [],
+            "monitor_next": accepted.get("recommendations", [])[:5],
+        }
+    else:
+        report_sections = _build_report_sections(
+            topic=investigation.topic,
+            accepted=accepted,
+            dropped=dropped if isinstance(dropped, list) else [],
+            disputed_claims=[],
+        )
     lineage_validation = _compute_report_lineage_validation(session, report.id)
     gate_enforced = settings.enforce_report_lineage_gate
     gate_passed = lineage_validation["coverage"] >= settings.report_min_lineage_coverage
