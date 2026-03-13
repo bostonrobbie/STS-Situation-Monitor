@@ -76,6 +76,32 @@
   /* Cesium overrides */
   .cesium-viewer-bottom { display: none !important; }
   .cesium-viewer-toolbar { display: none !important; }
+
+  /* ── Mobile responsive ──────────────────────────────────────── */
+  @media (max-width: 768px) {
+    .controls {
+      width: calc(100vw - 24px); left: 12px; top: auto; bottom: 60px;
+      max-height: 45vh; border-radius: 12px 12px 0 0; padding: 10px;
+    }
+    .controls h2 { font-size: 13px; }
+    .controls h3 { font-size: 11px; margin: 6px 0 4px; }
+    .layer-toggle { font-size: 13px; padding: 6px 0; }
+    .layer-toggle input { width: 18px; height: 18px; }
+    .info-panel {
+      width: calc(100vw - 24px); right: 12px; top: 12px;
+      max-height: 60vh; border-radius: 12px;
+    }
+    .status-bar {
+      bottom: 6px; padding: 4px 10px; gap: 8px; font-size: 10px;
+      width: auto; max-width: 95vw; flex-wrap: wrap; justify-content: center;
+    }
+    .filter-btn { padding: 5px 10px; font-size: 11px; }
+    .stat-row { font-size: 12px; padding: 4px 0; }
+  }
+  @media (max-width: 480px) {
+    .controls { max-height: 40vh; }
+    .status-bar { gap: 6px; font-size: 9px; }
+  }
 </style>
 </head>
 <body>

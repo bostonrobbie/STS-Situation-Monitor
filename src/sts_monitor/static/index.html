@@ -707,6 +707,258 @@ function KnowledgeGraphPage() {
   </div>`;
 }
 
+// ── Timeline Page ─────────────────────────────────────────────────
+function TimelinePage() {
+  const [investigations, setInvestigations] = useState([]);
+  const [selectedInv, setSelectedInv] = useState(null);
+  const [timeline, setTimeline] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => { api('/investigations').then(setInvestigations).catch(() => {}); }, []);
+
+  function loadTimeline(invId) {
+    setSelectedInv(invId);
+    setLoading(true);
+    api('/investigations/' + invId + '/timeline?window_minutes=30')
+      .then(data => { setTimeline(data); setLoading(false); })
+      .catch(() => setLoading(false));
+  }
+
+  const phaseColors = { emerging: '#3498db', developing: '#f39c12', peak: '#e74c3c', sustained: '#e67e22', fading: '#95a5a6', echo: '#7f8c8d' };
+
+  return html`<div class="page">
+    <div class="page-header"><h2>Timeline</h2></div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      ${investigations.map(inv => html`<button key=${inv.id} class="btn ${selectedInv === inv.id ? 'btn-primary' : ''}" onClick=${() => loadTimeline(inv.id)} style="font-size:12px">${inv.topic.substring(0, 40)}</button>`)}
+    </div>
+    ${loading ? html`<div class="card"><p>Loading timeline...</p></div>` : null}
+    ${timeline ? html`
+      <div class="card" style="margin-bottom:12px">
+        <div class="card-header"><span class="card-title">${timeline.topic}</span></div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-value">${timeline.total_events}</div><div class="stat-label">Events</div></div>
+          <div class="stat-card"><div class="stat-value">${(timeline.time_span_hours || 0).toFixed(1)}h</div><div class="stat-label">Time Span</div></div>
+          <div class="stat-card"><div class="stat-value">${timeline.pivots || 0}</div><div class="stat-label">Pivots</div></div>
+        </div>
+        ${timeline.summary ? html`<p style="margin-top:10px;color:var(--text-dim);font-size:13px">${timeline.summary}</p>` : null}
+      </div>
+      <div style="position:relative;padding-left:30px;border-left:3px solid var(--border)">
+        ${(timeline.events || []).map((evt, i) => html`
+          <div key=${i} style="margin-bottom:16px;position:relative">
+            <div style="position:absolute;left:-38px;width:14px;height:14px;border-radius:50%;background:${phaseColors[evt.phase] || '#666'};border:2px solid var(--bg-card);top:4px"></div>
+            <div class="card" style="border-left:3px solid ${phaseColors[evt.phase] || '#666'};${evt.is_pivot ? 'box-shadow:0 0 10px rgba(231,76,60,0.3)' : ''}">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <strong style="color:${phaseColors[evt.phase] || '#ccc'}">${evt.phase.toUpperCase()}</strong>
+                <span style="font-size:11px;color:var(--text-dim)">${evt.timestamp ? new Date(evt.timestamp).toLocaleString() : ''}</span>
+              </div>
+              <div style="font-weight:600;margin-bottom:4px">${evt.headline}</div>
+              <div style="font-size:12px;color:var(--text-dim)">${evt.detail}</div>
+              ${evt.entities && evt.entities.length ? html`<div style="margin-top:6px;font-size:11px">${evt.entities.map(e => html`<span key=${e} style="background:var(--accent);color:#000;padding:1px 6px;border-radius:3px;margin-right:4px">${e}</span>`)}</div>` : null}
+              ${evt.location ? html`<div style="margin-top:4px;font-size:11px;color:var(--text-dim)">Location: ${evt.location}</div>` : null}
+            </div>
+          </div>
+        `)}
+      </div>
+    ` : null}
+  </div>`;
+}
+
+// ── Templates Page ─────────────────────────────────────────────────
+function TemplatesPage() {
+  const [templates, setTemplates] = useState([]);
+  const [filter, setFilter] = useState(null);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    api('/templates' + (filter ? '?category=' + filter : '')).then(setTemplates).catch(() => {});
+  }, [filter]);
+
+  function applyTemplate(key) {
+    api('/templates/' + key + '/apply', { method: 'POST', body: JSON.stringify({}) })
+      .then(data => setMsg('Created investigation: ' + data.topic + ' (ID: ' + data.investigation_id.substring(0,8) + ')'))
+      .catch(e => setMsg('Error: ' + e.message));
+  }
+
+  const cats = ['geopolitical', 'local', 'conspiracy', 'natural_disaster'];
+  const catColors = { geopolitical: '#e74c3c', local: '#3498db', conspiracy: '#9b59b6', natural_disaster: '#e67e22' };
+
+  return html`<div class="page">
+    <div class="page-header"><h2>Investigation Templates</h2></div>
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <button class="btn ${!filter ? 'btn-primary' : ''}" onClick=${() => setFilter(null)}>All</button>
+      ${cats.map(c => html`<button key=${c} class="btn ${filter === c ? 'btn-primary' : ''}" onClick=${() => setFilter(c)}>${c.replace('_', ' ')}</button>`)}
+    </div>
+    ${msg ? html`<div class="card" style="border:1px solid var(--accent);margin-bottom:12px"><p>${msg}</p></div>` : null}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px">
+      ${templates.map(t => html`
+        <div key=${t.key} class="card">
+          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
+            <strong>${t.name}</strong>
+            <span style="background:${catColors[t.category] || '#666'};color:#fff;padding:2px 8px;border-radius:4px;font-size:11px">${t.category}</span>
+          </div>
+          <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">${t.description}</p>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">
+            ${(t.tags || []).map(tag => html`<span key=${tag} style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:3px;font-size:11px">${tag}</span>`)}
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            ${t.rabbit_trail ? html`<span style="color:#9b59b6;font-size:11px">Rabbit Trail Enabled</span>` : html`<span></span>`}
+            <button class="btn btn-primary" onClick=${() => applyTemplate(t.key)}>Deploy</button>
+          </div>
+        </div>
+      `)}
+    </div>
+  </div>`;
+}
+
+// ── Comparative Page ─────────────────────────────────────────────────
+function ComparativePage() {
+  const [investigations, setInvestigations] = useState([]);
+  const [selectedInv, setSelectedInv] = useState(null);
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => { api('/investigations').then(setInvestigations).catch(() => {}); }, []);
+
+  function loadReport(invId) {
+    setSelectedInv(invId);
+    setLoading(true);
+    api('/investigations/' + invId + '/comparative')
+      .then(data => { setReport(data); setLoading(false); })
+      .catch(() => setLoading(false));
+  }
+
+  return html`<div class="page">
+    <div class="page-header"><h2>Comparative Analysis</h2></div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      ${investigations.map(inv => html`<button key=${inv.id} class="btn ${selectedInv === inv.id ? 'btn-primary' : ''}" onClick=${() => loadReport(inv.id)} style="font-size:12px">${inv.topic.substring(0, 40)}</button>`)}
+    </div>
+    ${loading ? html`<div class="card"><p>Analyzing sources...</p></div>` : null}
+    ${report ? html`
+      <div class="stats-grid" style="margin-bottom:16px">
+        <div class="stat-card"><div class="stat-value">${report.total_sources}</div><div class="stat-label">Sources</div></div>
+        <div class="stat-card"><div class="stat-value">${report.contradiction_count}</div><div class="stat-label">Contradictions</div></div>
+        <div class="stat-card"><div class="stat-value">${report.agreement_count}</div><div class="stat-label">Agreements</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:${report.narrative_divergence_score > 0.5 ? '#e74c3c' : '#2ecc71'}">${(report.narrative_divergence_score * 100).toFixed(0)}%</div><div class="stat-label">Divergence</div></div>
+      </div>
+      ${report.contradictions && report.contradictions.length ? html`
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header"><span class="card-title" style="color:#e74c3c">Contradictions</span></div>
+          ${report.contradictions.slice(0, 15).map((c, i) => html`
+            <div key=${i} style="padding:10px;border-bottom:1px solid var(--border)">
+              <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                <span style="font-weight:600">${c.source_a} vs ${c.source_b}</span>
+                <span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${c.type === 'direct' ? 'rgba(231,76,60,0.2)' : 'rgba(243,156,18,0.2)'}">${c.type}</span>
+              </div>
+              <div style="font-size:12px;color:var(--text-dim)">${c.claim_a.substring(0, 120)}...</div>
+              <div style="font-size:12px;color:var(--text-dim);margin-top:4px">vs: ${c.claim_b.substring(0, 120)}...</div>
+            </div>
+          `)}
+        </div>
+      ` : null}
+      ${report.silences && report.silences.length ? html`
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header"><span class="card-title" style="color:#f39c12">Source Silences</span></div>
+          ${report.silences.map((s, i) => html`
+            <div key=${i} style="padding:8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
+              <span><strong>${s.source}</strong> — was reporting: ${s.was_reporting.substring(0, 60)}</span>
+              <span style="color:#e74c3c">${s.hours_silent.toFixed(0)}h silent</span>
+            </div>
+          `)}
+        </div>
+      ` : null}
+      ${report.agreements && report.agreements.length ? html`
+        <div class="card">
+          <div class="card-header"><span class="card-title" style="color:#2ecc71">Agreements</span></div>
+          ${report.agreements.slice(0, 15).map((a, i) => html`
+            <div key=${i} style="padding:8px;border-bottom:1px solid var(--border)">
+              <div style="font-size:13px">${a.claim.substring(0, 150)}</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${a.source_count} sources: ${a.sources.join(', ')}</div>
+            </div>
+          `)}
+        </div>
+      ` : null}
+    ` : null}
+  </div>`;
+}
+
+// ── Login Page ─────────────────────────────────────────────────────
+function LoginPage() {
+  const [mode, setMode] = useState('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [apiKey, setApiKey] = useState(localStorage.getItem('sts_api_key') || 'change-me');
+  const [msg, setMsg] = useState('');
+  const [loggedIn, setLoggedIn] = useState(!!localStorage.getItem('sts_jwt_token'));
+
+  function doLogin() {
+    fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    }).then(r => r.json()).then(data => {
+      if (data.access_token) {
+        localStorage.setItem('sts_jwt_token', data.access_token);
+        setLoggedIn(true);
+        setMsg('Logged in successfully');
+      } else {
+        setMsg('Login failed: ' + (data.detail || 'unknown error'));
+      }
+    }).catch(e => setMsg('Error: ' + e.message));
+  }
+
+  function doRegister() {
+    fetch('/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    }).then(r => r.json()).then(data => {
+      if (data.username) {
+        setMsg('Registered! You can now log in.');
+        setMode('login');
+      } else {
+        setMsg('Register failed: ' + (data.detail || 'unknown error'));
+      }
+    }).catch(e => setMsg('Error: ' + e.message));
+  }
+
+  function saveApiKey() {
+    localStorage.setItem('sts_api_key', apiKey);
+    setMsg('API key saved');
+  }
+
+  function logout() {
+    localStorage.removeItem('sts_jwt_token');
+    setLoggedIn(false);
+    setMsg('Logged out');
+  }
+
+  return html`<div class="page">
+    <div class="page-header"><h2>Authentication</h2></div>
+    ${msg ? html`<div class="card" style="border:1px solid var(--accent);margin-bottom:12px"><p>${msg}</p></div>` : null}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:800px">
+      <div class="card">
+        <div class="card-header"><span class="card-title">API Key</span></div>
+        <input type="text" value=${apiKey} onInput=${e => setApiKey(e.target.value)} style="width:100%;padding:8px;margin-bottom:8px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:4px" />
+        <button class="btn btn-primary" onClick=${saveApiKey}>Save API Key</button>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">${loggedIn ? 'Session' : (mode === 'login' ? 'Login' : 'Register')}</span></div>
+        ${loggedIn ? html`
+          <p style="color:#2ecc71;margin-bottom:10px">Authenticated</p>
+          <button class="btn" onClick=${logout}>Logout</button>
+        ` : html`
+          <input type="text" placeholder="Username" value=${username} onInput=${e => setUsername(e.target.value)} style="width:100%;padding:8px;margin-bottom:8px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:4px" />
+          <input type="password" placeholder="Password" value=${password} onInput=${e => setPassword(e.target.value)} style="width:100%;padding:8px;margin-bottom:8px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);border-radius:4px" />
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" onClick=${mode === 'login' ? doLogin : doRegister}>${mode === 'login' ? 'Login' : 'Register'}</button>
+            <button class="btn" onClick=${() => setMode(mode === 'login' ? 'register' : 'login')}>${mode === 'login' ? 'Need account?' : 'Have account?'}</button>
+          </div>
+        `}
+      </div>
+    </div>
+  </div>`;
+}
+
 // ── App root ────────────────────────────────────────────────────────
 function App() {
   const [page, setPage] = useState('dashboard');
@@ -717,7 +969,7 @@ function App() {
     return () => clearInterval(check);
   }, []);
 
-  const pages = { dashboard: DashboardPage, investigations: InvestigationsPage, search: SearchPage, map: MapPage, graph: KnowledgeGraphPage, reports: ReportsPage, settings: SettingsPage };
+  const pages = { dashboard: DashboardPage, investigations: InvestigationsPage, templates: TemplatesPage, timeline: TimelinePage, comparative: ComparativePage, search: SearchPage, map: MapPage, graph: KnowledgeGraphPage, reports: ReportsPage, auth: LoginPage, settings: SettingsPage };
   const PageComponent = pages[page] || DashboardPage;
 
   return html`<div class="app">

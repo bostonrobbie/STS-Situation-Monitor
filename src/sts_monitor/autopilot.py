@@ -1,12 +1,13 @@
-"""Autopilot — automatic intelligence cycling with local LLMs.
+"""Autopilot — automatic intelligence cycling with real connectors and local LLMs.
 
 Runs in the background, periodically processing all active investigations:
-1. Ingest simulated data (or real connectors when configured)
-2. Run signal pipeline
-3. Extract entities
-4. Cluster stories
-5. Run discovery
-6. Optionally run autonomous research agent (requires Ollama)
+1. Collect from real OSINT connectors (GDELT, NWS, USGS, RSS, Reddit)
+2. Fall back to simulated data if all connectors fail
+3. Run signal pipeline
+4. Extract entities
+5. Run rabbit trail analysis for flagged investigations
+6. Evaluate alert rules
+7. Broadcast events via EventBus
 
 Gracefully degrades when the LLM is offline — skips LLM-dependent steps
 and continues with heuristic-only processing.
@@ -32,6 +33,7 @@ AUTOPILOT_BATCH_SIZE = int(os.getenv("STS_AUTOPILOT_BATCH_SIZE", "15"))
 AUTOPILOT_USE_LLM = os.getenv("STS_AUTOPILOT_USE_LLM", "true").lower() in {"1", "true", "yes"}
 AUTOPILOT_RUN_AGENT = os.getenv("STS_AUTOPILOT_RUN_AGENT", "false").lower() in {"1", "true", "yes"}
 AUTOPILOT_MAX_INVESTIGATIONS = int(os.getenv("STS_AUTOPILOT_MAX_INVESTIGATIONS", "10"))
+AUTOPILOT_USE_REAL_CONNECTORS = os.getenv("STS_AUTOPILOT_USE_REAL_CONNECTORS", "true").lower() in {"1", "true", "yes"}
 
 
 @dataclass
@@ -45,6 +47,10 @@ class CycleLog:
     observations_ingested: int = 0
     entities_extracted: int = 0
     stories_clustered: int = 0
+    connectors_used: list[str] = field(default_factory=list)
+    connectors_failed: list[str] = field(default_factory=list)
+    alerts_fired: int = 0
+    rabbit_trail: bool = False
     llm_available: bool = False
     error: str | None = None
 
@@ -93,7 +99,92 @@ def _check_llm_available() -> bool:
         return False
 
 
-def _run_cycle_for_investigation(inv_id: str, inv_topic: str, llm_ok: bool) -> CycleLog:
+def _collect_from_real_connectors(topic: str, seed_query: str | None = None) -> tuple[list[Any], list[str], list[str]]:
+    """Try collecting from real OSINT connectors. Returns (observations, used, failed)."""
+    from sts_monitor.connectors import (
+        GDELTConnector, NWSAlertConnector, USGSEarthquakeConnector,
+        RSSConnector, RedditConnector, ReliefWebConnector,
+    )
+
+    query = seed_query or topic
+    all_obs: list[Any] = []
+    used: list[str] = []
+    failed: list[str] = []
+
+    # GDELT — global event data
+    try:
+        gdelt = GDELTConnector(
+            max_records=AUTOPILOT_BATCH_SIZE,
+            timeout_s=settings.gdelt_timeout_s,
+        )
+        result = gdelt.collect(query=query)
+        if result.observations:
+            all_obs.extend(result.observations)
+            used.append("gdelt")
+        else:
+            failed.append("gdelt:empty")
+    except Exception as e:
+        failed.append(f"gdelt:{e}")
+        log.debug("GDELT connector failed: %s", e)
+
+    # USGS Earthquakes
+    try:
+        usgs = USGSEarthquakeConnector(
+            min_magnitude=settings.usgs_min_magnitude,
+            timeout_s=settings.usgs_timeout_s,
+        )
+        result = usgs.collect(query=query)
+        if result.observations:
+            all_obs.extend(result.observations)
+            used.append("usgs")
+    except Exception as e:
+        failed.append(f"usgs:{e}")
+        log.debug("USGS connector failed: %s", e)
+
+    # NWS Weather Alerts
+    try:
+        nws = NWSAlertConnector(
+            severity_filter=settings.nws_severity_filter,
+            timeout_s=settings.nws_timeout_s,
+        )
+        result = nws.collect(query=query)
+        if result.observations:
+            all_obs.extend(result.observations)
+            used.append("nws")
+    except Exception as e:
+        failed.append(f"nws:{e}")
+        log.debug("NWS connector failed: %s", e)
+
+    # ReliefWeb
+    try:
+        rw = ReliefWebConnector(timeout_s=settings.reliefweb_timeout_s)
+        result = rw.collect(query=query)
+        if result.observations:
+            all_obs.extend(result.observations)
+            used.append("reliefweb")
+    except Exception as e:
+        failed.append(f"reliefweb:{e}")
+        log.debug("ReliefWeb connector failed: %s", e)
+
+    # Reddit OSINT subreddits
+    try:
+        reddit = RedditConnector(
+            subreddits=["worldnews", "geopolitics", "IntelligenceNews"],
+            per_subreddit_limit=5,
+            timeout_s=settings.reddit_timeout_s,
+        )
+        result = reddit.collect(query=query)
+        if result.observations:
+            all_obs.extend(result.observations)
+            used.append("reddit")
+    except Exception as e:
+        failed.append(f"reddit:{e}")
+        log.debug("Reddit connector failed: %s", e)
+
+    return all_obs, used, failed
+
+
+def _run_cycle_for_investigation(inv_id: str, inv_topic: str, llm_ok: bool, seed_query: str | None = None) -> CycleLog:
     """Run one autopilot cycle for a single investigation."""
     from sts_monitor.database import get_session
     from sts_monitor.entities import extract_entities
@@ -111,27 +202,57 @@ def _run_cycle_for_investigation(inv_id: str, inv_topic: str, llm_ok: bool) -> C
 
     try:
         with next(get_session()) as session:
-            # 1. Ingest simulated observations (matches main.py ingest pattern)
-            obs_list = generate_simulated_observations(
-                topic=inv_topic,
-                batch_size=AUTOPILOT_BATCH_SIZE,
-                include_noise=True,
-            )
-            for item in obs_list:
-                session.add(ObservationORM(
-                    investigation_id=inv_id,
-                    source=item.source,
-                    claim=item.claim,
-                    url=item.url,
-                    captured_at=item.captured_at,
-                    reliability_hint=item.reliability_hint,
-                ))
-            session.commit()
-            cycle_log.observations_ingested = len(obs_list)
+            # 1. Collect observations — try real connectors first, fall back to simulated
+            real_obs: list[Any] = []
+            if AUTOPILOT_USE_REAL_CONNECTORS:
+                try:
+                    real_obs, used, failed = _collect_from_real_connectors(inv_topic, seed_query)
+                    cycle_log.connectors_used = used
+                    cycle_log.connectors_failed = failed
+                except Exception as e:
+                    log.warning("Real connector collection failed for %s: %s", inv_id, e)
 
-            # 2. Run pipeline on all observations
+            if real_obs:
+                # Store real observations
+                for item in real_obs:
+                    session.add(ObservationORM(
+                        investigation_id=inv_id,
+                        source=item.source,
+                        claim=item.claim,
+                        url=item.url,
+                        captured_at=item.captured_at,
+                        reliability_hint=item.reliability_hint,
+                        connector_type=getattr(item, 'connector_type', 'real'),
+                        latitude=getattr(item, 'latitude', None),
+                        longitude=getattr(item, 'longitude', None),
+                    ))
+                session.commit()
+                cycle_log.observations_ingested = len(real_obs)
+            else:
+                # Fall back to simulated
+                sim_obs = generate_simulated_observations(
+                    topic=inv_topic,
+                    batch_size=AUTOPILOT_BATCH_SIZE,
+                    include_noise=True,
+                )
+                for item in sim_obs:
+                    session.add(ObservationORM(
+                        investigation_id=inv_id,
+                        source=item.source,
+                        claim=item.claim,
+                        url=item.url,
+                        captured_at=item.captured_at,
+                        reliability_hint=item.reliability_hint,
+                    ))
+                session.commit()
+                cycle_log.observations_ingested = len(sim_obs)
+                cycle_log.connectors_used = ["simulated"]
+
+            # 2. Run pipeline on recent observations
             try:
-                all_obs = session.query(ObservationORM).filter_by(investigation_id=inv_id).all()
+                recent_obs = session.query(ObservationORM).filter_by(
+                    investigation_id=inv_id
+                ).order_by(ObservationORM.captured_at.desc()).limit(200).all()
                 from sts_monitor.pipeline import Observation
                 pipeline = SignalPipeline()
                 pipe_obs = [
@@ -142,7 +263,7 @@ def _run_cycle_for_investigation(inv_id: str, inv_topic: str, llm_ok: bool) -> C
                         captured_at=o.captured_at or datetime.now(UTC),
                         reliability_hint=o.reliability_hint or 0.5,
                     )
-                    for o in all_obs
+                    for o in recent_obs
                 ]
                 if pipe_obs:
                     pipeline.run(pipe_obs, topic=inv_topic)
@@ -183,6 +304,41 @@ def _run_cycle_for_investigation(inv_id: str, inv_topic: str, llm_ok: bool) -> C
             except Exception as e:
                 log.warning("Entity extraction failed for %s: %s", inv_id, e)
 
+            # 4. Evaluate alert rules
+            try:
+                from sts_monitor.alert_engine import evaluate_rules, get_default_rules
+                obs_dicts = [
+                    {
+                        "id": o.id,
+                        "claim": o.claim,
+                        "source": o.source,
+                        "captured_at": o.captured_at,
+                        "reliability_hint": o.reliability_hint,
+                        "investigation_id": o.investigation_id,
+                    }
+                    for o in session.query(ObservationORM).filter_by(
+                        investigation_id=inv_id
+                    ).order_by(ObservationORM.captured_at.desc()).limit(500).all()
+                ]
+                rules = get_default_rules(investigation_id=inv_id)
+                alerts = evaluate_rules(rules, obs_dicts)
+                cycle_log.alerts_fired = len(alerts)
+
+                # Store alert events
+                if alerts:
+                    from sts_monitor.models import AlertEventORM
+                    import json
+                    for alert in alerts:
+                        session.add(AlertEventORM(
+                            investigation_id=inv_id,
+                            severity=alert.severity,
+                            message=alert.message[:500],
+                            detail_json=json.dumps(alert.details),
+                        ))
+                    session.commit()
+            except Exception as e:
+                log.warning("Alert evaluation failed for %s: %s", inv_id, e)
+
     except Exception as e:
         cycle_log.error = str(e)
         log.error("Autopilot cycle failed for %s: %s", inv_id, e)
@@ -212,21 +368,21 @@ async def _autopilot_loop():
             with next(get_session()) as session:
                 investigations = (
                     session.query(InvestigationORM)
-                    .filter(InvestigationORM.status.in_(["active", "monitoring"]))
+                    .filter(InvestigationORM.status.in_(["active", "monitoring", "open"]))
                     .order_by(InvestigationORM.priority.desc())
                     .limit(AUTOPILOT_MAX_INVESTIGATIONS)
                     .all()
                 )
-                inv_list = [(inv.id, inv.topic) for inv in investigations]
+                inv_list = [(inv.id, inv.topic, inv.seed_query) for inv in investigations]
 
             if not inv_list:
                 log.debug("Autopilot: no active investigations, sleeping")
                 continue
 
             # Run cycle for each investigation
-            for inv_id, inv_topic in inv_list:
+            for inv_id, inv_topic, seed_query in inv_list:
                 cycle_log = await asyncio.to_thread(
-                    _run_cycle_for_investigation, inv_id, inv_topic, llm_ok
+                    _run_cycle_for_investigation, inv_id, inv_topic, llm_ok, seed_query
                 )
                 _state.total_cycles += 1
                 _state.last_cycle_at = cycle_log.completed_at
@@ -238,6 +394,9 @@ async def _autopilot_loop():
                     "observations": cycle_log.observations_ingested,
                     "entities": cycle_log.entities_extracted,
                     "stories": cycle_log.stories_clustered,
+                    "connectors_used": cycle_log.connectors_used,
+                    "connectors_failed": cycle_log.connectors_failed,
+                    "alerts_fired": cycle_log.alerts_fired,
                     "llm": cycle_log.llm_available,
                     "error": cycle_log.error,
                 })

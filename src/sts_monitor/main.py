@@ -54,6 +54,11 @@ from sts_monitor.entity_graph import build_entity_graph
 from sts_monitor.narrative import build_narrative_timeline
 from sts_monitor.anomaly_detector import run_anomaly_detection
 from sts_monitor.autopilot import AUTOPILOT_ENABLED, get_state as get_autopilot_state, start_autopilot, stop_autopilot
+from sts_monitor.investigation_templates import list_templates, get_template, apply_template
+from sts_monitor.source_scoring import compute_source_scores, get_source_leaderboard
+from sts_monitor.comparative import run_comparative_analysis
+from sts_monitor.rabbit_trail import run_rabbit_trail, store_trail_session, get_trail_session, list_trail_sessions
+from sts_monitor.alert_engine import evaluate_rules, get_default_rules, AlertRule
 
 
 class InvestigationCreate(BaseModel):
@@ -5114,3 +5119,366 @@ def autopilot_start(_: AuthContext = Depends(require_api_key)) -> dict[str, Any]
 def autopilot_stop(_: AuthContext = Depends(require_api_key)) -> dict[str, Any]:
     """Stop the autopilot background task."""
     return stop_autopilot()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Investigation Templates
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/templates")
+def list_investigation_templates(
+    category: str | None = None,
+    _: AuthContext = Depends(require_api_key),
+) -> list[dict[str, Any]]:
+    """List available investigation templates."""
+    return list_templates(category=category)
+
+
+@app.get("/templates/{template_key}")
+def get_investigation_template(
+    template_key: str,
+    _: AuthContext = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Get a specific template configuration."""
+    tmpl = get_template(template_key)
+    if not tmpl:
+        raise HTTPException(status_code=404, detail=f"Template not found: {template_key}")
+    return apply_template(template_key)
+
+
+class TemplateApplyRequest(BaseModel):
+    custom_topic: str | None = None
+
+
+@app.post("/templates/{template_key}/apply")
+def apply_investigation_template(
+    template_key: str,
+    payload: TemplateApplyRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Create a new investigation from a template."""
+    config = apply_template(template_key, custom_topic=payload.custom_topic)
+    if "error" in config:
+        raise HTTPException(status_code=404, detail=config["error"])
+
+    inv = InvestigationORM(
+        id=str(uuid4()),
+        topic=config["topic"],
+        seed_query=config.get("seed_query"),
+        priority=config.get("priority", 50),
+        status=config.get("status", "active"),
+        owner=auth.label if auth else None,
+    )
+    session.add(inv)
+    session.commit()
+
+    return {
+        "investigation_id": inv.id,
+        "template": config["template_name"],
+        "topic": inv.topic,
+        "status": inv.status,
+        "config": config.get("config", {}),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Source Reliability Scoring
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/investigations/{investigation_id}/source-scores")
+def get_source_scores(
+    investigation_id: str,
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Get source reliability scores for an investigation."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    observations = session.query(ObservationORM).filter_by(
+        investigation_id=investigation_id
+    ).all()
+    obs_dicts = [
+        {"source": o.source, "claim": o.claim, "captured_at": o.captured_at,
+         "reliability_hint": o.reliability_hint, "id": o.id}
+        for o in observations
+    ]
+    return get_source_leaderboard(obs_dicts)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Comparative Analysis
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/investigations/{investigation_id}/comparative")
+def comparative_analysis(
+    investigation_id: str,
+    silence_hours: int = 12,
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Run cross-source comparative analysis — contradictions, agreements, silences."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    observations = session.query(ObservationORM).filter_by(
+        investigation_id=investigation_id
+    ).order_by(ObservationORM.captured_at.desc()).limit(1000).all()
+
+    obs_dicts = [
+        {"source": o.source, "claim": o.claim, "captured_at": o.captured_at,
+         "reliability_hint": o.reliability_hint, "id": o.id, "url": o.url}
+        for o in observations
+    ]
+    report = run_comparative_analysis(obs_dicts, silence_threshold_hours=silence_hours)
+    return report.to_dict()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Rabbit Trail (Deep Autonomous Investigation)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.post("/investigations/{investigation_id}/rabbit-trail")
+def start_rabbit_trail(
+    investigation_id: str,
+    max_depth: int = 10,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Start a rabbit trail deep investigation on an investigation."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    # Gather observations and entities
+    observations = session.query(ObservationORM).filter_by(
+        investigation_id=investigation_id
+    ).order_by(ObservationORM.captured_at.desc()).limit(500).all()
+
+    obs_dicts = [
+        {"source": o.source, "claim": o.claim, "captured_at": o.captured_at,
+         "reliability_hint": o.reliability_hint, "id": o.id, "url": o.url}
+        for o in observations
+    ]
+
+    entity_mentions = session.query(EntityMentionORM).filter_by(
+        investigation_id=investigation_id
+    ).all()
+    entities = list({em.normalized or em.entity_text for em in entity_mentions})
+
+    # Try to get LLM client
+    llm_client = None
+    try:
+        from sts_monitor.llm import LocalLLMClient
+        llm_client = LocalLLMClient(
+            base_url=settings.local_llm_url,
+            model=settings.local_llm_model,
+            timeout_s=settings.agent_llm_timeout_s,
+        )
+    except Exception:
+        pass
+
+    trail = run_rabbit_trail(
+        investigation_id=investigation_id,
+        topic=investigation.topic,
+        observations=obs_dicts,
+        entities=entities,
+        max_depth=max_depth,
+        llm_client=llm_client,
+    )
+    store_trail_session(trail)
+    return trail.to_dict()
+
+
+@app.get("/rabbit-trails")
+def list_rabbit_trails(
+    investigation_id: str | None = None,
+    _: AuthContext = Depends(require_api_key),
+) -> list[dict[str, Any]]:
+    """List all rabbit trail sessions."""
+    return list_trail_sessions(investigation_id=investigation_id)
+
+
+@app.get("/rabbit-trails/{session_id}")
+def get_rabbit_trail(
+    session_id: str,
+    _: AuthContext = Depends(require_api_key),
+) -> dict[str, Any]:
+    """Get details of a specific rabbit trail session."""
+    trail = get_trail_session(session_id)
+    if not trail:
+        raise HTTPException(status_code=404, detail="Trail session not found")
+    return trail.to_dict()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Alert Rules Engine
+# ═══════════════════════════════════════════════════════════════════════════
+
+class AlertRuleCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    rule_type: str = Field(pattern="^(volume_spike|contradiction_threshold|entity_velocity|silence|narrative_shift)$")
+    threshold: float = Field(default=5.0, ge=1)
+    window_minutes: int = Field(default=60, ge=5, le=1440)
+    cooldown_seconds: int = Field(default=600, ge=60)
+    severity: str = Field(default="warning", pattern="^(info|warning|critical)$")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.post("/investigations/{investigation_id}/alert-rules")
+def create_alert_rule(
+    investigation_id: str,
+    payload: AlertRuleCreate,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Create an alert rule for an investigation."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    rule = AlertRuleORM(
+        investigation_id=investigation_id,
+        name=payload.name,
+        min_observations=int(payload.threshold),
+        min_disputed_claims=payload.metadata.get("min_disputed", 1),
+        cooldown_seconds=payload.cooldown_seconds,
+        active=True,
+    )
+    session.add(rule)
+    session.commit()
+
+    return {
+        "id": rule.id,
+        "name": rule.name,
+        "rule_type": payload.rule_type,
+        "threshold": payload.threshold,
+        "window_minutes": payload.window_minutes,
+        "severity": payload.severity,
+        "active": rule.active,
+    }
+
+
+@app.get("/investigations/{investigation_id}/alert-rules")
+def list_alert_rules(
+    investigation_id: str,
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> list[dict[str, Any]]:
+    """List alert rules for an investigation."""
+    rules = session.query(AlertRuleORM).filter_by(investigation_id=investigation_id).all()
+    return [
+        {
+            "id": r.id,
+            "name": r.name,
+            "min_observations": r.min_observations,
+            "min_disputed_claims": r.min_disputed_claims,
+            "cooldown_seconds": r.cooldown_seconds,
+            "active": r.active,
+            "last_triggered_at": r.last_triggered_at.isoformat() if r.last_triggered_at else None,
+        }
+        for r in rules
+    ]
+
+
+@app.post("/investigations/{investigation_id}/evaluate-alerts")
+def evaluate_investigation_alerts(
+    investigation_id: str,
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Evaluate all alert rules against current investigation data."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    observations = session.query(ObservationORM).filter_by(
+        investigation_id=investigation_id
+    ).order_by(ObservationORM.captured_at.desc()).limit(1000).all()
+
+    obs_dicts = [
+        {"id": o.id, "claim": o.claim, "source": o.source,
+         "captured_at": o.captured_at, "reliability_hint": o.reliability_hint,
+         "investigation_id": o.investigation_id}
+        for o in observations
+    ]
+
+    rules = get_default_rules(investigation_id=investigation_id)
+    events = evaluate_rules(rules, obs_dicts)
+
+    # Store events
+    for evt in events:
+        session.add(AlertEventORM(
+            investigation_id=investigation_id,
+            severity=evt.severity,
+            message=evt.message[:500],
+            detail_json=json.dumps(evt.details, default=str),
+        ))
+    if events:
+        session.commit()
+
+    return {
+        "alerts_fired": len(events),
+        "events": [e.to_dict() for e in events],
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Timeline (Narrative) View API
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/investigations/{investigation_id}/timeline")
+def get_investigation_timeline(
+    investigation_id: str,
+    window_minutes: int = 30,
+    _: AuthContext = Depends(require_api_key),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Get narrative timeline for an investigation."""
+    investigation = session.get(InvestigationORM, investigation_id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    observations = session.query(ObservationORM).filter_by(
+        investigation_id=investigation_id
+    ).order_by(ObservationORM.captured_at.asc()).limit(1000).all()
+
+    obs_dicts = [
+        {"source": o.source, "claim": o.claim, "captured_at": o.captured_at,
+         "reliability_hint": o.reliability_hint, "url": o.url, "id": o.id}
+        for o in observations
+    ]
+
+    from sts_monitor.narrative import build_narrative_timeline
+    timeline = build_narrative_timeline(
+        observations=obs_dicts,
+        topic=investigation.topic,
+        investigation_id=investigation_id,
+        window_minutes=window_minutes,
+    )
+    return {
+        "topic": timeline.topic,
+        "investigation_id": timeline.investigation_id,
+        "time_span_hours": timeline.time_span_hours,
+        "total_events": timeline.total_events,
+        "phases": dict(timeline.phases),
+        "pivots": timeline.pivots,
+        "summary": timeline.summary,
+        "events": [
+            {
+                "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+                "phase": e.phase,
+                "headline": e.headline,
+                "detail": e.detail,
+                "sources": e.sources,
+                "reliability": e.reliability,
+                "entities": e.entities,
+                "location": e.location,
+                "is_pivot": e.is_pivot,
+            }
+            for e in timeline.events
+        ],
+    }
