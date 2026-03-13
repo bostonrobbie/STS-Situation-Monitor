@@ -31,7 +31,7 @@ OSINT_ACCOUNTS: dict[str, list[str]] = {
         "sentdefender", "WarMonitor3", "IntelCrab",
     ],
     "natural_disaster": [
-        "ABORITO1", "TheWeatherMan78", "NWStweets", "ABORITO1",
+        "ABORITO1", "TheWeatherMan78", "NWStweets",
         "earthquakeBot", "USGSBigQuakes", "NWS",
     ],
     "geopolitics": [
@@ -39,7 +39,7 @@ OSINT_ACCOUNTS: dict[str, list[str]] = {
         "BNONews", "spectaborindex",
     ],
     "osint": [
-        "belaborlingcat", "christogrozev", "DFRLab",
+        "bellingcat", "christogrozev", "DFRLab",
         "IntelDoge", "OSINTdefender",
     ],
 }

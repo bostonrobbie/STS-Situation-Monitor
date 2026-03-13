@@ -30,7 +30,7 @@ def _domain_reliability(domain: str) -> float:
     """Return reliability hint based on domain reputation."""
     domain = domain.lower().strip()
     for known, score in _TRUSTED_DOMAINS.items():
-        if domain.endswith(known):
+        if domain == known or domain.endswith("." + known):
             return score
     return 0.55
 

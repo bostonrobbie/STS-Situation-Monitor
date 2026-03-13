@@ -116,7 +116,10 @@ class TestOllamaEmbeddingClient:
         monkeypatch.setattr(mod.httpx, "post", fake_post)
         client = OllamaEmbeddingClient()
         results = client.embed_batch(["a", "b", "c"])
-        assert len(results) == 2  # second one failed
+        assert len(results) == 3  # same length as input, failed entry is None
+        assert results[0] is not None
+        assert results[1] is None  # second one failed
+        assert results[2] is not None
 
     def test_health_reachable(self, monkeypatch):
         import sts_monitor.embeddings as mod

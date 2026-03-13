@@ -131,8 +131,12 @@ class ACLEDConnector:
                 if actor2:
                     claim += f" vs {actor2}"
             claim += f" in {location_str}"
-            if fatalities and int(fatalities) > 0:
-                claim += f" ({fatalities} fatalities)"
+            try:
+                fatalities_int = int(fatalities) if fatalities else 0
+            except (ValueError, TypeError):
+                fatalities_int = 0
+            if fatalities_int > 0:
+                claim += f" ({fatalities_int} fatalities)"
             if notes:
                 claim += f". {notes[:300]}"
 
@@ -159,7 +163,7 @@ class ACLEDConnector:
                 "title": claim[:500],
                 "latitude": lat,
                 "longitude": lon,
-                "magnitude": float(fatalities) if fatalities else 0.0,
+                "magnitude": float(fatalities_int),
                 "event_time": captured_at,
                 "properties": {
                     "event_type": etype,

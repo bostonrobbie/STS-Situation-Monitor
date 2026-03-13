@@ -58,8 +58,10 @@ def score_text(*, text: str, plan: QueryPlan, base_reliability: float) -> float:
     content = _norm(text)
     tokens = set(TOKEN_RE.findall(content))
 
-    if plan.exclude_terms and any(ex in content for ex in plan.exclude_terms):
-        return 0.0
+    if plan.exclude_terms:
+        content_tokens = set(TOKEN_RE.findall(content))
+        if plan.exclude_terms & content_tokens:
+            return 0.0
 
     term_hits = len(plan.include_terms.intersection(tokens))
     phrase_hits = sum(1 for phrase in plan.include_phrases if phrase in content)
@@ -68,8 +70,11 @@ def score_text(*, text: str, plan: QueryPlan, base_reliability: float) -> float:
         return 0.0
 
     term_score = min(1.0, term_hits / max(1, len(plan.include_terms)))
-    phrase_score = min(1.0, phrase_hits / max(1, len(plan.include_phrases) or 1))
-    combined = (0.65 * term_score) + (0.35 * phrase_score)
+    if plan.include_phrases:
+        phrase_score = min(1.0, phrase_hits / max(1, len(plan.include_phrases)))
+        combined = (0.65 * term_score) + (0.35 * phrase_score)
+    else:
+        combined = term_score
     reliability = max(0.0, min(1.0, base_reliability))
     return round((0.75 * combined) + (0.25 * reliability), 4)
 

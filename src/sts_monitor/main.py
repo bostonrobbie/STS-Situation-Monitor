@@ -890,7 +890,8 @@ def update_investigation(
         investigation.owner = payload.owner
     if payload.status is not None:
         investigation.status = payload.status
-    investigation.sla_due_at = payload.sla_due_at
+    if payload.sla_due_at is not None:
+        investigation.sla_due_at = payload.sla_due_at
     _record_audit(session, actor=auth, action="investigation.update", resource_type="investigation", resource_id=investigation_id, detail=payload.model_dump())
     session.commit()
     return Investigation.model_validate(investigation, from_attributes=True)

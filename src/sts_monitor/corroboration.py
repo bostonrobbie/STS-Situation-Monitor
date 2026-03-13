@@ -306,8 +306,8 @@ def score_cluster(cluster: list[dict[str, Any]]) -> CorroborationScore:
     # 4. Temporal convergence (max 0.15) — rapid independent reporting is strong
     if len(timestamps) >= 2:
         spread_hours = (timestamps[-1] - timestamps[0]).total_seconds() / 3600
-        # Sweet spot: reported by multiple sources within 1-6 hours
-        if 0 < spread_hours <= 6:
+        # Sweet spot: simultaneous or within 1-6 hours (strongest temporal signal)
+        if spread_hours <= 6:
             temporal_score = 0.15
         elif spread_hours <= 24:
             temporal_score = 0.10

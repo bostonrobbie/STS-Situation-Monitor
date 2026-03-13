@@ -411,7 +411,7 @@ def _compute_centrality(nodes: list[GraphNode], edges: list[GraphEdge]) -> None:
         node.centrality = degree.get(i, 0) / max_degree
 
         # Bridge: connected to 2+ different communities
-        connected_comms = neighbor_communities.get(i, set())
+        connected_comms = neighbor_communities.get(i, set()).copy()
         # Include own community
         connected_comms.add(node.community)
         if len(connected_comms) >= 3:

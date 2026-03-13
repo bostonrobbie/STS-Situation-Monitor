@@ -108,10 +108,10 @@ class TestZScore:
         assert _z_score(5.0, 5.0, 0.0) == 0.0
 
     def test_zero_std_above(self) -> None:
-        assert _z_score(10.0, 5.0, 0.0) == 3.0
+        assert _z_score(10.0, 5.0, 0.0) == 10.0
 
     def test_zero_std_below(self) -> None:
-        assert _z_score(0.0, 5.0, 0.0) == -3.0
+        assert _z_score(0.0, 5.0, 0.0) == -10.0
 
 
 class TestSeverityFromZ:

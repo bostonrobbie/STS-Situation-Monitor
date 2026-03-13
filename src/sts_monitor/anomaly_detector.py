@@ -96,7 +96,7 @@ def _std(values: list[float]) -> float:
 
 def _z_score(value: float, mean: float, std: float) -> float:
     if std == 0:
-        return 0.0 if value == mean else (3.0 if value > mean else -3.0)
+        return 0.0 if value == mean else (10.0 if value > mean else -10.0)
     return (value - mean) / std
 
 
@@ -322,7 +322,7 @@ def detect_entity_velocity_anomalies(
             anomalies.append(Anomaly(
                 anomaly_type="entity_velocity",
                 severity=_severity_from_z(z),
-                title=f"Entity surge: '{entity_key}' — {det_count} mentions ({z:.1f}x normal)",
+                title=f"Entity surge: '{entity_key}' — {det_count} mentions ({det_count / max(expected, 1):.1f}x normal)",
                 description=(
                     f"Entity '{entity_key}' has {det_count} mentions in the last {detection_hours}h, "
                     f"compared to an expected {expected:.1f} based on {baseline_hours}h baseline."

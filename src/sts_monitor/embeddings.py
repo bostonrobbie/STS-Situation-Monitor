@@ -83,14 +83,20 @@ class OllamaEmbeddingClient:
         latency = round((time.perf_counter() - started) * 1000, 2)
         return EmbeddingResult(text=text, vector=vector, model=self.model, latency_ms=latency)
 
-    def embed_batch(self, texts: list[str]) -> list[EmbeddingResult]:
-        """Generate embeddings for multiple texts (sequential)."""
-        results: list[EmbeddingResult] = []
+    def embed_batch(self, texts: list[str]) -> list[EmbeddingResult | None]:
+        """Generate embeddings for multiple texts (sequential).
+
+        Returns a list with the same length as *texts*: successful entries contain
+        an ``EmbeddingResult``, failed entries are ``None`` so that the caller can
+        align results with the original input by index.
+        """
+        results: list[EmbeddingResult | None] = []
         for text in texts:
             try:
                 results.append(self.embed(text))
             except Exception as exc:
                 logger.warning("Embedding failed for text (len=%d): %s", len(text), exc)
+                results.append(None)
         return results
 
     def health(self) -> dict[str, Any]:
@@ -309,7 +315,7 @@ class SemanticSearchEngine:
 
         points: list[dict[str, Any]] = []
         for obs, emb in zip(observations, embeddings):
-            if not emb.vector:
+            if emb is None or not emb.vector:
                 continue
             point_id = _observation_point_id(obs["id"])
             points.append({
@@ -332,7 +338,7 @@ class SemanticSearchEngine:
 
         return {
             "indexed": indexed,
-            "failed": len(observations) - len(embeddings),
+            "failed": len(observations) - indexed,
             "total_in_collection": self.store.count(),
         }
 

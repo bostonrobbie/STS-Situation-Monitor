@@ -378,6 +378,7 @@ def process_job(session: Session, job: JobORM, pipeline: SignalPipeline, llm_cli
         session.commit()
         return {"job_id": job.id, "status": job.status, "result": result}
     except Exception as exc:
+        session.rollback()
         job.last_error = str(exc)
         job.updated_at = datetime.now(UTC)
         if job.attempts >= job.max_attempts:
