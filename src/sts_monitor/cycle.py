@@ -17,9 +17,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sts_monitor.connectors.base import Connector, ConnectorResult
+from sts_monitor.deep_truth import DeepTruthVerdict, analyze_deep_truth
 from sts_monitor.enrichment import EnrichmentResult, run_enrichment
 from sts_monitor.pipeline import Observation, PipelineResult, SignalPipeline
 from sts_monitor.report_generator import IntelligenceReport, ReportGenerator
+from sts_monitor.surge_detector import SurgeAnalysisResult, analyze_surge
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +258,12 @@ class CycleResult:
     # Report
     report: IntelligenceReport | None
 
+    # Surge intelligence (social media analysis)
+    surge_analysis: SurgeAnalysisResult | None
+
+    # Deep Truth forensic analysis
+    deep_truth_verdict: DeepTruthVerdict | None
+
     # Discovery & promotion
     promoted_topics: list[PromotedTopic]
 
@@ -280,6 +288,21 @@ class CycleResult:
             f"Alerts fired: {len(self.alerts_fired)}",
             f"Topics promoted: {len(self.promoted_topics)}",
         ]
+        if self.surge_analysis and self.surge_analysis.total_processed > 0:
+            sa = self.surge_analysis
+            lines.append(f"Surge analysis: {sa.total_processed} social posts — "
+                         f"{sa.alpha_count} alpha, {sa.noise_count} noise, {sa.disinfo_count} disinfo")
+            if sa.surge_detected:
+                lines.append(f"  SURGE DETECTED: {len(sa.surges)} surge event(s)")
+        if self.deep_truth_verdict:
+            dt = self.deep_truth_verdict
+            lines.append(f"Deep Truth: authority={dt.authority_weight.score:.2f} "
+                         f"({dt.authority_weight.skepticism_level}), "
+                         f"provenance={dt.provenance.entropy_bits:.1f} bits")
+            if dt.manufactured_consensus_detected:
+                lines.append("  *** MANUFACTURED CONSENSUS INDICATORS ***")
+            if dt.active_suppression_detected:
+                lines.append("  *** ACTIVE SUPPRESSION INDICATORS ***")
         if self.report:
             lines.append(f"Report: {self.report.generation_method} ({self.report.generation_time_ms:.0f}ms)")
         for alert in self.alerts_fired:
@@ -302,6 +325,8 @@ def run_cycle(
     alert_rules: list[dict[str, Any]] | None = None,
     generate_report: bool = True,
     promote_threshold: float = 0.4,
+    run_surge_analysis: bool = True,
+    run_deep_truth: bool = True,
 ) -> CycleResult:
     """Run one complete intelligence cycle.
 
@@ -385,7 +410,39 @@ def run_cycle(
     for alert in alerts:
         logger.info("Cycle %s ALERT [%s] %s: %s", cycle_id, alert.severity, alert.rule_name, alert.message)
 
-    # ── 5. Report generation ──────────────────────────────────────
+    # ── 5. Surge analysis on social media observations ──────────
+    surge_result: SurgeAnalysisResult | None = None
+    if run_surge_analysis:
+        social_connectors = {"nitter", "reddit"}
+        social_obs = [
+            {"source": o.source, "claim": o.claim, "url": o.url,
+             "captured_at": o.captured_at, "reliability_hint": o.reliability_hint}
+            for o in pipeline_result.accepted
+            if o.source.split(":")[0] in social_connectors
+        ]
+        if social_obs:
+            surge_result = analyze_surge(social_obs, topic=topic)
+            logger.info("Cycle %s: surge analysis — %d processed, %d alpha, %d disinfo",
+                        cycle_id, surge_result.total_processed,
+                        surge_result.alpha_count, surge_result.disinfo_count)
+
+    # ── 6. Deep Truth forensic analysis ───────────────────────────
+    deep_truth: DeepTruthVerdict | None = None
+    if run_deep_truth and len(pipeline_result.accepted) >= 5:
+        obs_dicts = [
+            {"source": o.source, "claim": o.claim, "url": o.url,
+             "captured_at": o.captured_at, "reliability_hint": o.reliability_hint}
+            for o in pipeline_result.accepted
+        ]
+        deep_truth = analyze_deep_truth(obs_dicts, topic)
+        logger.info("Cycle %s: deep truth — authority=%.2f, provenance=%.1f bits, "
+                     "manufactured=%s, suppression=%s",
+                    cycle_id, deep_truth.authority_weight.score,
+                    deep_truth.provenance.entropy_bits,
+                    deep_truth.manufactured_consensus_detected,
+                    deep_truth.active_suppression_detected)
+
+    # ── 7. Report generation ──────────────────────────────────────
     report: IntelligenceReport | None = None
     if generate_report and pipeline_result.accepted:
         gen = report_generator or ReportGenerator()
@@ -419,7 +476,7 @@ def run_cycle(
             convergence_zones=convergence_dicts,
         )
 
-    # ── 6. Story/topic promotion ──────────────────────────────────
+    # ── 8. Story/topic promotion ──────────────────────────────────
     promoted = promote_discoveries(enrichment, min_score=promote_threshold)
 
     elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
@@ -440,5 +497,7 @@ def run_cycle(
         enrichment=enrichment,
         alerts_fired=alerts,
         report=report,
+        surge_analysis=surge_result,
+        deep_truth_verdict=deep_truth,
         promoted_topics=promoted,
     )
