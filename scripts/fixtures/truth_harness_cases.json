@@ -1,0 +1,23 @@
+[
+  {
+    "name": "disputed_cluster_detection",
+    "topic": "grid outage",
+    "min_reliability": 0.4,
+    "expected_disputed_min": 1,
+    "observations": [
+      {"source": "rss:feed-a", "claim": "Power restored in district 7", "url": "https://a/1", "reliability_hint": 0.8},
+      {"source": "reddit:r/news", "claim": "Power restored in district 7 is false", "url": "https://b/1", "reliability_hint": 0.7}
+    ]
+  },
+  {
+    "name": "low_signal_filtering",
+    "topic": "rumor watch",
+    "min_reliability": 0.6,
+    "expected_accepted": 1,
+    "expected_dropped": 1,
+    "observations": [
+      {"source": "rss:feed-a", "claim": "Official update published", "url": "https://a/2", "reliability_hint": 0.9},
+      {"source": "rss:feed-b", "claim": "Unverified rumor", "url": "https://b/2", "reliability_hint": 0.2}
+    ]
+  }
+]

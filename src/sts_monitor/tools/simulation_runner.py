@@ -36,6 +36,16 @@ def run_full_workflow_simulation() -> dict:
     check("create investigation", created, 200)
     investigation_id = created.json()["id"]
 
+    queue_sim = client.post(
+        f"/jobs/enqueue/ingest-simulated/{investigation_id}",
+        json={"batch_size": 20, "include_noise": True},
+        headers=auth,
+    )
+    check("enqueue simulated ingest job", queue_sim, 200)
+
+    process_sim = client.post("/jobs/process-next", headers=auth)
+    check("process simulated ingest job", process_sim, 200)
+
     sim = client.post(
         f"/investigations/{investigation_id}/ingest/simulated",
         json={"batch_size": 40, "include_noise": True},
@@ -52,6 +62,38 @@ def run_full_workflow_simulation() -> dict:
 
     observations = client.get(f"/investigations/{investigation_id}/observations", headers=auth)
     check("list observations", observations, 200)
+
+    schedule = client.post(
+        "/schedules",
+        json={
+            "name": "harbor-sim-run",
+            "job_type": "run_pipeline",
+            "payload": {"investigation_id": investigation_id, "use_llm": False},
+            "interval_seconds": 10,
+            "priority": 70,
+        },
+        headers=auth,
+    )
+    check("create schedule", schedule, 200)
+
+    tick = client.post("/schedules/tick", headers=auth)
+    check("tick schedules", tick, 200)
+
+    schedules = client.get("/schedules", headers=auth)
+    check("list schedules", schedules, 200)
+
+    queue_run = client.post(
+        f"/jobs/enqueue/run/{investigation_id}",
+        json={"use_llm": False},
+        headers=auth,
+    )
+    check("enqueue run job", queue_run, 200)
+
+    process_run = client.post("/jobs/process-next", headers=auth)
+    check("process run job", process_run, 200)
+
+    process_batch = client.post("/jobs/process-batch", json={"high_quota": 1, "normal_quota": 1, "low_quota": 1}, headers=auth)
+    check("process job batch", process_batch, 200)
 
     run_no_llm = client.post(f"/investigations/{investigation_id}/run", json={"use_llm": False}, headers=auth)
     check("run pipeline no llm", run_no_llm, 200)
@@ -75,9 +117,99 @@ def run_full_workflow_simulation() -> dict:
     ingestion_runs = client.get(f"/investigations/{investigation_id}/ingestion-runs", headers=auth)
     check("ingestion run audit", ingestion_runs, 200)
 
+    jobs_list = client.get("/jobs", headers=auth)
+    check("list jobs", jobs_list, 200)
+
+    dead_letters = client.get("/jobs/dead-letters", headers=auth)
+    check("list dead letters", dead_letters, 200)
+
     dashboard = client.get("/dashboard/summary", headers=auth)
     check("dashboard summary", dashboard, 200)
 
     out["passed"] = all(item["ok"] for item in out["checks"])
     out["summary"] = json.dumps({"total_checks": len(out["checks"]), "passed": out["passed"]})
     return out
+
+
+def summarize_simulation(result: dict) -> dict[str, object]:
+    checks = result.get("checks", [])
+    if not isinstance(checks, list):
+        checks = []
+
+    failed_names = [
+        item.get("name", "unknown")
+        for item in checks
+        if isinstance(item, dict) and not item.get("ok", False)
+    ]
+
+    dashboard = None
+    preflight = None
+    for item in checks:
+        if not isinstance(item, dict):
+            continue
+        if item.get("name") == "dashboard summary":
+            dashboard = item.get("body")
+        if item.get("name") == "preflight":
+            preflight = item.get("body")
+
+    return {
+        "passed": bool(result.get("passed", False)),
+        "total_checks": len(checks),
+        "failed_checks": failed_names,
+        "dashboard": dashboard if isinstance(dashboard, dict) else None,
+        "preflight": preflight if isinstance(preflight, dict) else None,
+    }
+
+
+def format_simulation_report(result: dict) -> str:
+    summary = summarize_simulation(result)
+    status = "PASS" if summary["passed"] else "FAIL"
+
+    lines = [
+        "STS Simulated Functioning Report",
+        "=" * 32,
+        f"Status: {status}",
+        f"Checks: {summary['total_checks']}",
+    ]
+
+    if summary["failed_checks"]:
+        lines.append("Failed checks:")
+        lines.extend(f"- {name}" for name in summary["failed_checks"])
+
+    preflight = summary.get("preflight")
+    if isinstance(preflight, dict):
+        llm = preflight.get("llm", {})
+        readiness = preflight.get("readiness", {})
+        lines.extend(
+            [
+                "",
+                "Preflight:",
+                f"- readiness: {readiness.get('level', 'unknown')} ({readiness.get('score', 'n/a')})",
+                f"- llm reachable: {llm.get('reachable', False)}",
+                f"- llm model available: {llm.get('model_available', False)}",
+            ]
+        )
+
+    dashboard = summary.get("dashboard")
+    if isinstance(dashboard, dict):
+        lines.extend(
+            [
+                "",
+                "Dashboard snapshot:",
+                f"- investigations: {dashboard.get('investigations', 0)}",
+                f"- observations: {dashboard.get('observations', 0)}",
+                f"- reports: {dashboard.get('reports', 0)}",
+                f"- claims: {dashboard.get('claims', 0)}",
+                f"- jobs_pending: {dashboard.get('jobs_pending', 0)}",
+                f"- jobs_failed: {dashboard.get('jobs_failed', 0)}",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "Tip: run `python scripts/demo_simulated_functioning.py --json` for full event-level output.",
+        ]
+    )
+
+    return "\n".join(lines)
