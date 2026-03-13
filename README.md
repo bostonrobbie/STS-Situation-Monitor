@@ -202,6 +202,22 @@ curl -H "X-API-Key: your-key" http://localhost:8080/investigations
 - Local LLM endpoint (Ollama) keeps AI processing on-premises.
 - Privacy status inspectable via API.
 
+## Backups
+
+```bash
+# SQLite database backup/restore
+python scripts/db_backup.py
+python scripts/db_restore.py backups/<backup-file>.db
+
+# Full Git repository backup (bundle with all branches/tags/history)
+python scripts/repo_backup.py              # create bundle
+python scripts/repo_backup.py --verify     # create + verify integrity
+python scripts/repo_backup.py --mirror URL # also push mirror to another remote
+
+# Restore from bundle
+git clone backups/sts-monitor_<timestamp>.bundle sts-monitor-restored
+```
+
 ## Documentation
 
 | Document | Description |
