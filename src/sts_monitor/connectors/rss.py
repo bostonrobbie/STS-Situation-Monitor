@@ -84,7 +84,6 @@ class RSSConnector:
                     )
                 )
 
-        return ConnectorResult(connector=self.name, observations=observations)
         return ConnectorResult(
             connector=self.name,
             observations=observations,

@@ -212,10 +212,6 @@ class SignalPipeline:
                 dropped.append(adjusted)
 
         disputed_claims = self._find_disputed_claims(deduplicated)
-        summary = (
-            f"Topic '{topic}': {len(accepted)} high-signal observations retained, "
-            f"{len(dropped)} filtered as low-confidence noise, "
-            f"{len(disputed_claims)} disputed claim cluster(s)."
         confidence = self._compute_confidence(accepted, disputed_claims)
         summary = (
             f"Topic '{topic}': {len(accepted)} high-signal observations retained, "

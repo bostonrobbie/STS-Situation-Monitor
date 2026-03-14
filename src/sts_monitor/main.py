@@ -887,33 +887,6 @@ def preflight(session: Session = Depends(get_session)) -> dict[str, Any]:
     llm_health = llm_client.health()
     db_path = settings.database_url.removeprefix("sqlite:///") if settings.database_url.startswith("sqlite") else None
     workspace_root = Path(settings.workspace_root).resolve()
-    filesystem = {
-        "database_path_exists": Path(db_path).exists() if db_path else None,
-        "cwd": str(Path.cwd()),
-        "workspace_root": str(workspace_root),
-        "workspace_root_exists": workspace_root.exists(),
-    }
-
-    return {
-        "database": {"ok": db_ok, "detail": db_detail, "url": settings.database_url},
-        "llm": {
-            "ok": llm_health.reachable and llm_health.model_available,
-            "reachable": llm_health.reachable,
-            "model_available": llm_health.model_available,
-            "detail": llm_health.detail,
-            "base_url": settings.local_llm_url,
-            "model": settings.local_llm_model,
-            "max_retries": settings.local_llm_max_retries,
-        },
-        "filesystem": filesystem,
-        },
-        "filesystem": filesystem,
-    }
-
-
-@app.post("/investigations", response_model=Investigation)
-def create_investigation(payload: InvestigationCreate, session: Session = Depends(get_session)) -> Investigation:
-    investigation = InvestigationORM(
     workspace = _workspace_health_snapshot(workspace_root)
     filesystem = {
         "database_path_exists": Path(db_path).exists() if db_path else None,
@@ -940,7 +913,7 @@ def create_investigation(payload: InvestigationCreate, session: Session = Depend
             "reachable": llm_health.reachable,
             "model_available": llm_health.model_available,
             "detail": llm_health.detail,
-            "latency_ms": llm_health.latency_ms,
+            "latency_ms": getattr(llm_health, "latency_ms", None),
             "base_url": settings.local_llm_url,
             "model": settings.local_llm_model,
             "max_retries": settings.local_llm_max_retries,
@@ -957,13 +930,6 @@ def create_investigation(payload: InvestigationCreate, session: Session = Depend
     }
 
 
-@app.post("/investigations", response_model=Investigation)
-def create_investigation(
-    payload: InvestigationCreate,
-    _: None = Depends(require_api_key),
-    session: Session = Depends(get_session),
-) -> Investigation:
-    investigation = InvestigationORM(
 @app.get("/system/online-tools")
 def online_tools() -> dict[str, Any]:
     return {
@@ -1013,7 +979,7 @@ def list_investigations(_: None = Depends(require_api_key), session: Session = D
 def ingest_rss(
     investigation_id: str,
     payload: RSSIngestRequest,
-    _: None = Depends(require_api_key),
+    auth: AuthContext = Depends(require_analyst),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     investigation = session.get(InvestigationORM, investigation_id)
@@ -1070,7 +1036,7 @@ def ingest_rss(
 def ingest_simulated(
     investigation_id: str,
     payload: SimulatedIngestRequest,
-    _: None = Depends(require_api_key),
+    auth: AuthContext = Depends(require_analyst),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     investigation = session.get(InvestigationORM, investigation_id)
@@ -1176,7 +1142,7 @@ def list_observations(
 def run_pipeline(
     investigation_id: str,
     payload: RunRequest | None = None,
-    _: None = Depends(require_api_key),
+    auth: AuthContext = Depends(require_analyst),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     investigation = session.get(InvestigationORM, investigation_id)
@@ -1243,7 +1209,7 @@ def run_pipeline(
 def submit_feedback(
     investigation_id: str,
     payload: FeedbackRequest,
-    _: None = Depends(require_api_key),
+    auth: AuthContext = Depends(require_analyst),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     investigation = session.get(InvestigationORM, investigation_id)
@@ -1352,77 +1318,6 @@ def list_investigations(session: Session = Depends(get_session)) -> list[Investi
     return [Investigation.model_validate(item, from_attributes=True) for item in investigations]
 
 
-@app.post("/investigations/{investigation_id}/ingest/rss")
-def ingest_rss(
-    investigation_id: str,
-    payload: RSSIngestRequest,
-    session: Session = Depends(get_session),
-) -> dict[str, Any]:
-    investigation = session.get(InvestigationORM, investigation_id)
-    if not investigation:
-        raise HTTPException(status_code=404, detail="Investigation not found")
-
-    connector = RSSConnector(feed_urls=payload.feed_urls, per_feed_limit=payload.per_feed_limit)
-    result = connector.collect(query=payload.query or investigation.seed_query or investigation.topic)
-
-    for item in result.observations:
-        session.add(
-            ObservationORM(
-                investigation_id=investigation_id,
-                source=item.source,
-                claim=item.claim,
-                url=item.url,
-                captured_at=item.captured_at,
-                reliability_hint=item.reliability_hint,
-            )
-        )
-
-    session.commit()
-    stored_count = session.scalar(
-        select(func.count(ObservationORM.id)).where(ObservationORM.investigation_id == investigation_id)
-    )
-
-    return {
-        "investigation_id": investigation_id,
-        "connector": result.connector,
-        "ingested_count": len(result.observations),
-        "stored_count": stored_count or 0,
-    }
-
-
-@app.post("/investigations/{investigation_id}/ingest/simulated")
-def ingest_simulated(
-    investigation_id: str,
-    payload: SimulatedIngestRequest,
-    session: Session = Depends(get_session),
-) -> dict[str, Any]:
-    investigation = session.get(InvestigationORM, investigation_id)
-    if not investigation:
-        raise HTTPException(status_code=404, detail="Investigation not found")
-
-    generated = generate_simulated_observations(
-        topic=investigation.topic,
-        batch_size=payload.batch_size,
-        include_noise=payload.include_noise,
-    )
-    for item in generated:
-        session.add(
-            ObservationORM(
-                investigation_id=investigation_id,
-                source=item.source,
-                claim=item.claim,
-                url=item.url,
-                captured_at=item.captured_at,
-                reliability_hint=item.reliability_hint,
-            )
-        )
-    session.commit()
-
-    return {
-        "investigation_id": investigation_id,
-        "connector": "simulated",
-        "ingested_count": len(generated),
-    }
 
 
 @app.get("/investigations/{investigation_id}/observations")
@@ -1448,90 +1343,6 @@ def list_observations(investigation_id: str, session: Session = Depends(get_sess
         }
         for item in observations
     ]
-
-
-@app.post("/investigations/{investigation_id}/run")
-def run_pipeline(
-    investigation_id: str,
-    payload: RunRequest | None = None,
-    session: Session = Depends(get_session),
-) -> dict[str, Any]:
-    investigation = session.get(InvestigationORM, investigation_id)
-    if not investigation:
-        raise HTTPException(status_code=404, detail="Investigation not found")
-
-    db_observations = session.scalars(
-        select(ObservationORM).where(ObservationORM.investigation_id == investigation_id)
-    ).all()
-    if not db_observations:
-        raise HTTPException(status_code=400, detail="No observations available. Ingest data before running pipeline.")
-
-    observations = [
-        Observation(
-            source=item.source,
-            claim=item.claim,
-            url=item.url,
-            captured_at=item.captured_at,
-            reliability_hint=item.reliability_hint,
-        )
-        for item in db_observations
-    ]
-
-    result = pipeline.run(observations, topic=investigation.topic)
-    accepted = [asdict(item) for item in result.accepted]
-    dropped = [asdict(item) for item in result.dropped]
-
-    llm_summary: str | None = None
-    should_use_llm = bool(payload and payload.use_llm)
-    if should_use_llm:
-        prompt = _build_report_text(investigation.topic, result.summary, result.confidence, result.disputed_claims)
-        try:
-            llm_summary = llm_client.summarize(prompt)
-        except Exception as exc:
-            llm_summary = f"LLM unavailable, fallback to deterministic summary: {exc}"
-
-    report = ReportORM(
-        investigation_id=investigation_id,
-        generated_at=datetime.now(UTC),
-        summary=llm_summary or result.summary,
-        confidence=result.confidence,
-        accepted_json=json.dumps(accepted, default=str),
-        dropped_json=json.dumps(dropped, default=str),
-    )
-    session.add(report)
-    session.commit()
-
-    return {
-        "investigation_id": investigation_id,
-        "generated_at": report.generated_at.isoformat(),
-        "summary": report.summary,
-        "confidence": report.confidence,
-        "accepted": accepted,
-        "dropped": dropped,
-        "disputed_claims": result.disputed_claims,
-        "deduplicated_count": len(result.deduplicated),
-    }
-
-
-@app.post("/investigations/{investigation_id}/feedback")
-def submit_feedback(
-    investigation_id: str,
-    payload: FeedbackRequest,
-    session: Session = Depends(get_session),
-) -> dict[str, Any]:
-    investigation = session.get(InvestigationORM, investigation_id)
-    if not investigation:
-        raise HTTPException(status_code=404, detail="Investigation not found")
-
-    feedback = FeedbackORM(
-        investigation_id=investigation_id,
-        label=payload.label.strip().lower(),
-        notes=payload.notes,
-        created_at=datetime.now(UTC),
-    )
-    session.add(feedback)
-    session.commit()
-    return {"status": "saved", "feedback_id": feedback.id}
 
 
 @app.get("/investigations/{investigation_id}/memory")
@@ -2722,8 +2533,7 @@ def ingest_usgs(
         min_magnitude=payload.min_magnitude,
         lookback_hours=payload.lookback_hours,
         max_events=payload.max_events,
-        use_summary_feed=payload.use_summary_feed,
-        summary_feed=payload.summary_feed,
+        use_summary_feed=payload.summary_feed if payload.use_summary_feed else None,
         timeout_s=settings.usgs_timeout_s,
     )
     return _ingest_with_geo_connector(
@@ -4564,7 +4374,7 @@ def list_observations(
 def run_pipeline(
     investigation_id: str,
     payload: RunRequest | None = None,
-    auth: AuthContext = Depends(require_api_key),
+    auth: AuthContext = Depends(require_analyst),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     investigation = session.get(InvestigationORM, investigation_id)

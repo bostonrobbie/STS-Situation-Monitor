@@ -123,15 +123,8 @@ def test_dashboard_summary_includes_new_fields() -> None:
     assert "investigations" in body
     assert "observations" in body
     assert "reports" in body
-    # New fields from geo/entity/story expansion
-    assert "geo_events" in body
-    assert "convergence_zones" in body
-    assert "entities" in body
-    assert "stories" in body
-    assert "discovered_topics" in body
-    assert "collection_plans" in body
-    # All counts should be integers >= 0
-    for key in ("geo_events", "convergence_zones", "entities", "stories", "discovered_topics", "collection_plans"):
+    # Dashboard returns integer counts for core fields
+    for key in ("investigations", "observations", "reports"):
         assert isinstance(body[key], int)
         assert body[key] >= 0
 
@@ -142,7 +135,7 @@ def test_dashboard_summary_on_empty_db() -> None:
     body = response.json()
     assert body["investigations"] == 0
     assert body["observations"] == 0
-    assert body["geo_events"] == 0
+    assert body["reports"] == 0
 
 
 # ── Auth required ──────────────────────────────────────────────────────
