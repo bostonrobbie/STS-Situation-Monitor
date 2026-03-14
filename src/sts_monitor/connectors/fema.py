@@ -111,7 +111,7 @@ class FEMADisasterConnector:
             designated_area = record.get("designatedArea", "")
             begin_date = record.get("incidentBeginDate", "")
             end_date = record.get("incidentEndDate", "")
-            place_code = record.get("placeCode", "")
+            _place_code = record.get("placeCode", "")
 
             captured_at = datetime.now(UTC)
             if declaration_date:

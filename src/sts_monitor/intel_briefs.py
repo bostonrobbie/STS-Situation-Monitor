@@ -11,7 +11,7 @@ Generates structured intel briefs from autopilot findings with:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 log = logging.getLogger(__name__)

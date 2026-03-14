@@ -7,7 +7,6 @@ API docs: https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from urllib.parse import quote_plus
 
 import httpx
 
@@ -98,8 +97,8 @@ class GDELTConnector:
             title = article.get("title", "").strip()
             domain = article.get("domain", "")
             seendate = article.get("seendate", "")
-            source_country = article.get("sourcecountry", "")
-            language = article.get("language", "")
+            _source_country = article.get("sourcecountry", "")
+            _language = article.get("language", "")
 
             if not title or not url:
                 continue

@@ -19,10 +19,9 @@ as a vertical timeline or story view.
 """
 from __future__ import annotations
 
-import re
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from sts_monitor.entities import extract_entities
@@ -369,7 +368,7 @@ def _generate_summary(
     parts: list[str] = []
 
     # Opening
-    first = events[0]
+    _first = events[0]
     parts.append(
         f"Timeline of '{topic}' spans {time_span:.1f} hours with {len(events)} events."
     )

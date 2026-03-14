@@ -10,8 +10,7 @@ For higher accuracy, can optionally use the local LLM for extraction.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 
 
 @dataclass(slots=True)

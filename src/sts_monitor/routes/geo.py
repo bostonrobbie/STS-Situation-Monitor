@@ -12,7 +12,6 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from sts_monitor.config import settings
 from sts_monitor.connectors.webcams import (
     CURATED_CAMERAS,
     get_cameras_near,
@@ -29,7 +28,6 @@ from sts_monitor.geofence import (
     get_zone_activity_summary,
     remove_zone,
 )
-from sts_monitor.helpers import persist_geo_events
 from sts_monitor.models import (
     AlertEventORM,
     ConvergenceZoneORM,
@@ -37,7 +35,6 @@ from sts_monitor.models import (
     InvestigationORM,
     ObservationORM,
 )
-from sts_monitor.pipeline import Observation
 from sts_monitor.security import AuthContext, require_api_key
 
 router = APIRouter()
@@ -238,7 +235,7 @@ def dashboard_map_data(
     cutoff = datetime.now(UTC) - timedelta(hours=max(1, min(hours, 720)))
     q = select(GeoEventORM).where(GeoEventORM.event_time >= cutoff)
     if layers:
-        layer_list = [l.strip() for l in layers.split(",") if l.strip()]
+        layer_list = [item.strip() for item in layers.split(",") if item.strip()]
         if layer_list:
             q = q.where(GeoEventORM.layer.in_(layer_list))
     q = q.order_by(GeoEventORM.event_time.desc()).limit(2000)

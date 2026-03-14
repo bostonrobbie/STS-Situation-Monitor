@@ -10,12 +10,10 @@ to feed into the web scraper connector.
 from __future__ import annotations
 
 import re
-import time
 from datetime import UTC, datetime
 from html import unescape
 from html.parser import HTMLParser
-from typing import Any
-from urllib.parse import quote_plus, unquote, urlparse
+from urllib.parse import unquote, urlparse
 
 import httpx
 

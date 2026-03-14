@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import sqrt
 from typing import Any
@@ -356,7 +356,7 @@ def detect_silence_anomalies(
     """
     now = datetime.now(UTC)
     baseline_start = now - timedelta(hours=baseline_hours)
-    silence_start = now - timedelta(hours=silence_hours)
+    _silence_start = now - timedelta(hours=silence_hours)
 
     # Track source activity
     source_last_seen: dict[str, datetime] = {}

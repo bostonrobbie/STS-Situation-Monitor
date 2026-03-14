@@ -11,7 +11,6 @@ Uses the free Wayback Machine API (no auth required).
 """
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 from typing import Any

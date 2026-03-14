@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -148,7 +148,7 @@ class AccountCredibilityStore:
     def boost(self, handle: str, amount: float = 0.05, reason: str = "") -> None:
         """Increase account credibility (corroborated claim, expert content)."""
         profile = self.get_or_create(handle)
-        old = profile.credibility_score
+        _old = profile.credibility_score
         profile.credibility_score = min(1.0, profile.credibility_score + amount)
         profile.correct_calls += 1
         if reason:
@@ -157,7 +157,7 @@ class AccountCredibilityStore:
     def penalize(self, handle: str, amount: float = 0.1, reason: str = "") -> None:
         """Decrease account credibility (debunked claim, bot behavior, etc)."""
         profile = self.get_or_create(handle)
-        old = profile.credibility_score
+        _old = profile.credibility_score
         profile.credibility_score = max(0.0, profile.credibility_score - amount)
         profile.incorrect_calls += 1
         if reason:

@@ -109,7 +109,7 @@ class ACLEDConnector:
             notes = event.get("notes", "")
             source = event.get("source", "")
             source_scale = event.get("source_scale", "")
-            inter1 = event.get("inter1", "")
+            _inter1 = event.get("inter1", "")
 
             try:
                 lat = float(lat_str)

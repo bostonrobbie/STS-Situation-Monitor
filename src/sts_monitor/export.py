@@ -4,7 +4,6 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -159,7 +158,7 @@ def _build_simple_pdf(text: str) -> bytes:
             + b"\nendstream\nendobj\n"
         )
 
-        page_num = add_obj(
+        _page_num = add_obj(
             f"{len(objects)} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {content_num} 0 R /Resources << /Font << /F1 3 0 R >> >> >>\nendobj\n".encode()
         )
         page_obj_nums.append(len(objects))

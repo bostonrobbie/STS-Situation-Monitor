@@ -23,13 +23,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sts_monitor.connectors.base import ConnectorResult
 from sts_monitor.connectors.nitter import NitterConnector, get_accounts_for_categories
 from sts_monitor.connectors.search import SearchConnector
 from sts_monitor.connectors.web_scraper import WebScraperConnector
 from sts_monitor.connectors.rss import RSSConnector
 from sts_monitor.collection_plan import get_curated_feeds
-from sts_monitor.corroboration import analyze_corroboration
 from sts_monitor.slop_detector import filter_slop
 from sts_monitor.llm import LocalLLMClient
 from sts_monitor.pipeline import Observation, SignalPipeline

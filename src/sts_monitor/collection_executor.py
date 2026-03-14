@@ -9,12 +9,12 @@ the connectors (how to collect).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from sts_monitor.collection_plan import CollectionRequirement
-from sts_monitor.connectors.base import Connector, ConnectorResult
+from sts_monitor.connectors.base import Connector
 from sts_monitor.pipeline import Observation
 
 logger = logging.getLogger(__name__)

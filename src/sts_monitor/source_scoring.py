@@ -8,8 +8,8 @@ from __future__ import annotations
 import logging
 import math
 from collections import defaultdict
-from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -190,7 +190,7 @@ def get_source_leaderboard(
     """Return a ranked leaderboard of source reliability."""
     scores = compute_source_scores(observations)
     top = scores[:top_n]
-    bottom = [s for s in scores if s.raw_score < 0.4]
+    _bottom = [s for s in scores if s.raw_score < 0.4]
     trusted = [s for s in scores if s.reliability_grade in ("A", "B")]
     untrusted = [s for s in scores if s.reliability_grade in ("D", "F")]
 

@@ -15,7 +15,6 @@ import argparse
 import json
 import logging
 import sys
-from datetime import UTC, datetime, timedelta
 
 
 def _setup_logging(verbose: bool = False) -> None:
@@ -135,7 +134,7 @@ def _print_deep_truth(verdict) -> None:
     print(f"Source independence: {verdict.provenance.source_independence:.1%}")
     print(f"Primary source ratio: {verdict.provenance.primary_source_ratio:.1%}")
 
-    print(f"\n--- Tracks ---")
+    print("\n--- Tracks ---")
     for track in verdict.tracks:
         survived = "SURVIVED" if track.survived_attack else "DESTROYED"
         print(f"  [{survived}] {track.track_name}: {track.probability:.0%} probability")
@@ -143,11 +142,11 @@ def _print_deep_truth(verdict) -> None:
             print(f"    - Weakness: {w}")
 
     if verdict.silence_gaps:
-        print(f"\n--- Silence Gaps ---")
+        print("\n--- Silence Gaps ---")
         for gap in verdict.silence_gaps:
             print(f"  [{gap.importance:.0%}] {gap.question}")
 
-    print(f"\n--- Verdict ---")
+    print("\n--- Verdict ---")
     print(verdict.verdict_summary)
     print(f"\nProbability distribution: {json.dumps({k: f'{v:.0%}' for k, v in verdict.probability_distribution.items()})}")
     print(f"Meta-confidence in this analysis: {verdict.confidence_in_verdict:.0%}")

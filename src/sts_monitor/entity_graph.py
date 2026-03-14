@@ -19,12 +19,11 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from itertools import combinations
 from typing import Any
 
-from sts_monitor.entities import ExtractedEntity, extract_entities
+from sts_monitor.entities import extract_entities
 
 
 @dataclass(slots=True)
@@ -153,7 +152,7 @@ def build_entity_graph(
     for obs in observations:
         claim = obs.get("claim", "")
         source = obs.get("source", "")
-        url = obs.get("url", "")
+        _url = obs.get("url", "")
         reliability = obs.get("reliability_hint", 0.5)
         captured = obs.get("captured_at", "")
         investigation = obs.get("investigation_id", "")

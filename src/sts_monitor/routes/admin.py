@@ -11,7 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from sts_monitor.autopilot import get_state as get_autopilot_state, start_autopilot, stop_autopilot
-from sts_monitor.config import settings
 from sts_monitor.database import get_session
 from sts_monitor.investigation_templates import apply_template, get_template, list_templates
 from sts_monitor.knowledge_graph import build_knowledge_graph

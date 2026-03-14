@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 from typing import Any, Type
 
-from sts_monitor.connectors.base import Connector, ConnectorResult
+from sts_monitor.connectors.base import Connector
 
 logger = logging.getLogger(__name__)
 

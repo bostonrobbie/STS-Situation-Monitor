@@ -29,10 +29,9 @@ import hashlib
 import json
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from sts_monitor.models import (
@@ -41,7 +40,6 @@ from sts_monitor.models import (
     EntityMentionORM,
     InvestigationORM,
     ObservationORM,
-    StoryObservationORM,
     StoryORM,
 )
 

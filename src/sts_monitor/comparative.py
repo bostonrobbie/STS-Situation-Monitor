@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -238,7 +238,7 @@ def detect_contradictions(observations: list[dict[str, Any]]) -> list[Contradict
                     claim_b=b.claim[:300], source_b=b.source,
                     contradiction_type="framing",
                     confidence=similarity * 0.7,
-                    description=f"Sources frame the same event differently — one negates while the other doesn't",
+                    description="Sources frame the same event differently — one negates while the other doesn't",
                     captured_at_a=a.captured_at, captured_at_b=b.captured_at,
                 ))
 

@@ -3,7 +3,6 @@ from sts_monitor.connectors.rss import RSSConnector
 
 __all__ = ["Connector", "ConnectorResult", "RSSConnector"]
 from sts_monitor.connectors.reddit import RedditConnector
-from sts_monitor.connectors.rss import RSSConnector
 from sts_monitor.connectors.gdelt import GDELTConnector
 from sts_monitor.connectors.usgs import USGSEarthquakeConnector
 from sts_monitor.connectors.nasa_firms import NASAFIRMSConnector

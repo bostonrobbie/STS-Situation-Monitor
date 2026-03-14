@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
-from dataclasses import dataclass, field
-from typing import Any, Protocol
+from dataclasses import field
+from typing import Any
 
 from sts_monitor.pipeline import Observation
 

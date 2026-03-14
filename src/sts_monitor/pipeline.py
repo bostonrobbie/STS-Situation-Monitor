@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from datetime import datetime, UTC
 from typing import Iterable
 
 
@@ -27,7 +26,6 @@ class PipelineResult:
 
 class SignalPipeline:
     """Prototype ranking/filtering pipeline with basic dedup and dispute detection."""
-    """Simple ranking/filtering pipeline for rapid prototyping."""
 
     contradiction_markers = ["false", "hoax", "debunked", "not true", "fabricated", "fake", "denied", "refuted"]
 
@@ -37,8 +35,6 @@ class SignalPipeline:
     @staticmethod
     def _normalize_claim(text: str) -> str:
         return " ".join(text.strip().lower().split())
-
-    contradiction_markers = ["false", "hoax", "debunked", "not true", "fabricated", "fake"]
 
     @classmethod
     def _is_contradiction(cls, text: str) -> bool:
@@ -79,90 +75,6 @@ class SignalPipeline:
         disputed: list[str] = []
         for claim, counts in groups.items():
             if counts["support"] > 0 and counts["contradict"] > 0:
-                disputed.append(claim)
-        return disputed
-
-    def run(self, observations: Iterable[Observation], topic: str) -> PipelineResult:
-        deduplicated = self._deduplicate(observations)
-        accepted: list[Observation] = []
-        dropped: list[Observation] = []
-
-        for observation in deduplicated:
-            bounded_reliability = max(0.0, min(1.0, observation.reliability_hint))
-            adjusted = Observation(
-                source=observation.source,
-                claim=observation.claim,
-                url=observation.url,
-                captured_at=observation.captured_at,
-                reliability_hint=bounded_reliability,
-            )
-            if adjusted.reliability_hint >= self.min_reliability:
-                accepted.append(adjusted)
-            else:
-                dropped.append(adjusted)
-    def run(self, observations: Iterable[Observation], topic: str) -> PipelineResult:
-        deduplicated = self._deduplicate(observations)
-        accepted: list[Observation] = []
-        dropped: list[Observation] = []
-
-        for observation in deduplicated:
-            bounded_reliability = max(0.0, min(1.0, observation.reliability_hint))
-            adjusted = Observation(
-                source=observation.source,
-                claim=observation.claim,
-                url=observation.url,
-                captured_at=observation.captured_at,
-                reliability_hint=bounded_reliability,
-            )
-            if adjusted.reliability_hint >= self.min_reliability:
-                accepted.append(adjusted)
-            else:
-                dropped.append(adjusted)
-        groups: dict[str, dict[str, object]] = {}
-        for item in observations:
-            normalized = self._claim_cluster_key(item.claim)
-            signal = groups.setdefault(
-                normalized,
-                {
-                    "support_families": set(),
-                    "contradict_families": set(),
-                    "latest_support": None,
-                    "latest_contradict": None,
-                },
-            )
-            source_family = self._source_family(item.source)
-            if self._is_contradiction(item.claim):
-                cast_set = signal["contradict_families"]
-                assert isinstance(cast_set, set)
-                cast_set.add(source_family)
-                latest = signal["latest_contradict"]
-                if latest is None or item.captured_at > latest:
-                    signal["latest_contradict"] = item.captured_at
-            else:
-                cast_set = signal["support_families"]
-                assert isinstance(cast_set, set)
-                cast_set.add(source_family)
-                latest = signal["latest_support"]
-                if latest is None or item.captured_at > latest:
-                    signal["latest_support"] = item.captured_at
-
-        disputed: list[str] = []
-        for claim, detail in groups.items():
-            support_families = detail["support_families"]
-            contradict_families = detail["contradict_families"]
-            assert isinstance(support_families, set)
-            assert isinstance(contradict_families, set)
-            if not support_families or not contradict_families:
-                continue
-
-            independent_sources = len(support_families.union(contradict_families))
-            latest_support = detail["latest_support"]
-            latest_contradict = detail["latest_contradict"]
-            temporal_flip = False
-            if isinstance(latest_support, datetime) and isinstance(latest_contradict, datetime):
-                temporal_flip = abs((latest_support - latest_contradict).total_seconds()) > 3600
-
-            if independent_sources >= 2 or temporal_flip:
                 disputed.append(claim)
         return disputed
 

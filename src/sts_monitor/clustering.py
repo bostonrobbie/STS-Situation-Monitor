@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 
@@ -151,7 +151,7 @@ def cluster_observations(
         for c_idx, c_term_counter in enumerate(cluster_terms):
             # Check temporal proximity: observation must be within window of cluster
             cluster_times = [recent[j].captured_at for j in clusters[c_idx]]
-            earliest = min(cluster_times)
+            _earliest = min(cluster_times)
             latest = max(cluster_times)
 
             # Observation should be within reasonable time range of cluster

@@ -59,10 +59,10 @@ class CrossInvestigationReport:
         return {
             "investigations_analyzed": self.investigations_analyzed,
             "total_links": self.total_links,
-            "shared_entities": [l.to_dict() for l in self.shared_entities[:50]],
-            "shared_sources": [l.to_dict() for l in self.shared_sources[:30]],
-            "geographic_overlaps": [l.to_dict() for l in self.geographic_overlaps[:20]],
-            "high_priority_links": [l.to_dict() for l in self.high_priority_links[:20]],
+            "shared_entities": [link.to_dict() for link in self.shared_entities[:50]],
+            "shared_sources": [link.to_dict() for link in self.shared_sources[:30]],
+            "geographic_overlaps": [link.to_dict() for link in self.geographic_overlaps[:20]],
+            "high_priority_links": [link.to_dict() for link in self.high_priority_links[:20]],
         }
 
 
@@ -125,7 +125,7 @@ def detect_cross_investigation_links(session) -> CrossInvestigationReport:
             sample_claims=entity_claims.get(entity, [])[:5],
         ))
 
-    shared_entities.sort(key=lambda l: l.total_mentions, reverse=True)
+    shared_entities.sort(key=lambda link: link.total_mentions, reverse=True)
 
     # ── Shared sources ─────────────────────────────────────────────
     source_inv_map: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -153,7 +153,7 @@ def detect_cross_investigation_links(session) -> CrossInvestigationReport:
             link_type="shared_source",
         ))
 
-    shared_sources.sort(key=lambda l: len(l.investigation_ids), reverse=True)
+    shared_sources.sort(key=lambda link: len(link.investigation_ids), reverse=True)
 
     # ── Geographic overlaps ────────────────────────────────────────
     geo_inv_map: dict[str, list[tuple[str, float, float]]] = defaultdict(list)
@@ -179,18 +179,18 @@ def detect_cross_investigation_links(session) -> CrossInvestigationReport:
             link_type="geographic_proximity",
         ))
 
-    geographic_overlaps.sort(key=lambda l: l.total_mentions, reverse=True)
+    geographic_overlaps.sort(key=lambda link: link.total_mentions, reverse=True)
 
     # ── High priority: entities with high confidence across 3+ investigations ──
     high_priority = [
-        l for l in shared_entities
-        if len(l.investigation_ids) >= 3 or l.total_mentions >= 10
+        link for link in shared_entities
+        if len(link.investigation_ids) >= 3 or link.total_mentions >= 10
     ]
     high_priority.extend(
-        l for l in geographic_overlaps
-        if len(l.investigation_ids) >= 3
+        link for link in geographic_overlaps
+        if len(link.investigation_ids) >= 3
     )
-    high_priority.sort(key=lambda l: l.confidence, reverse=True)
+    high_priority.sort(key=lambda link: link.confidence, reverse=True)
 
     total_links = len(shared_entities) + len(shared_sources) + len(geographic_overlaps)
 

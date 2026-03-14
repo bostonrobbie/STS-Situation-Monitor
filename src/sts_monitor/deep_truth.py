@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -627,7 +627,7 @@ def _build_triple_track(
     authority: AuthorityWeight,
 ) -> list[TrackAnalysis]:
     """Build three analysis tracks: mainstream, dissenting, hybrid."""
-    all_text = " ".join(obs.get("claim", "") for obs in observations)
+    _all_text = " ".join(obs.get("claim", "") for obs in observations)
 
     # Track 1: Mainstream
     mainstream_evidence = [

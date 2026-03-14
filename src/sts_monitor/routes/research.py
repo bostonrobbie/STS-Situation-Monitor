@@ -323,7 +323,7 @@ def list_twitter_categories(
     _: None = Depends(require_api_key),
 ) -> dict[str, Any]:
     """List available OSINT Twitter account categories."""
-    from sts_monitor.connectors.nitter import OSINT_ACCOUNTS, list_osint_categories
+    from sts_monitor.connectors.nitter import OSINT_ACCOUNTS
 
     return {
         "categories": [

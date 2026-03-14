@@ -9,9 +9,9 @@ Detects:
 from __future__ import annotations
 
 import logging
-from collections import defaultdict, Counter
+from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 log = logging.getLogger(__name__)

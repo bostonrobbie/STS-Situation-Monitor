@@ -10,9 +10,8 @@ Falls back to heuristic scoring when LLM is unavailable.
 from __future__ import annotations
 
 import logging
-import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 

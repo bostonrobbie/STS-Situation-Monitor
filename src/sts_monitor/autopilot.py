@@ -103,7 +103,7 @@ def _collect_from_real_connectors(topic: str, seed_query: str | None = None) -> 
     """Try collecting from real OSINT connectors. Returns (observations, used, failed)."""
     from sts_monitor.connectors import (
         GDELTConnector, NWSAlertConnector, USGSEarthquakeConnector,
-        RSSConnector, RedditConnector, ReliefWebConnector,
+        RedditConnector, ReliefWebConnector,
     )
 
     query = seed_query or topic

@@ -9,7 +9,6 @@ Wraps the existing OllamaEmbeddingClient + QdrantStore to provide:
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
 from sts_monitor.config import settings
