@@ -599,7 +599,7 @@ def test_preflight_exposes_readiness_and_connector_checks(monkeypatch) -> None:
 
 
 def test_preflight_readiness_degrades_when_queue_unhealthy(monkeypatch) -> None:
-    import sts_monitor.main as main_mod
+    import sts_monitor.routes.system as system_mod
 
     class FakeHealth:
         reachable = True
@@ -607,9 +607,9 @@ def test_preflight_readiness_degrades_when_queue_unhealthy(monkeypatch) -> None:
         detail = "ok"
         latency_ms = 10.0
 
-    monkeypatch.setattr(main_mod.llm_client, "health", lambda: FakeHealth())
-    monkeypatch.setattr(main_mod, "_connector_diagnostics", lambda: {"ok": True, "checks": {}})
-    monkeypatch.setattr(main_mod, "_workspace_health_snapshot", lambda root: {
+    monkeypatch.setattr(system_mod, "llm_client", type("C", (), {"health": staticmethod(lambda: FakeHealth())})())
+    monkeypatch.setattr(system_mod, "connector_diagnostics", lambda: {"ok": True, "checks": {}})
+    monkeypatch.setattr(system_mod, "workspace_health_snapshot", lambda root: {
         "ok": True,
         "workspace_root": str(root),
         "workspace_root_exists": True,
@@ -617,7 +617,7 @@ def test_preflight_readiness_degrades_when_queue_unhealthy(monkeypatch) -> None:
         "min_disk_free_mb": 256,
         "writable_hint": True,
     })
-    monkeypatch.setattr(main_mod, "_queue_health_snapshot", lambda session: {
+    monkeypatch.setattr(system_mod, "queue_health_snapshot", lambda session: {
         "ok": False,
         "pending": 200,
         "failed": 1,
@@ -634,7 +634,7 @@ def test_preflight_readiness_degrades_when_queue_unhealthy(monkeypatch) -> None:
 
 
 def test_preflight_readiness_blocked_when_multiple_systems_down(monkeypatch) -> None:
-    import sts_monitor.main as main_mod
+    import sts_monitor.routes.system as system_mod
 
     class FakeHealth:
         reachable = False
@@ -642,9 +642,9 @@ def test_preflight_readiness_blocked_when_multiple_systems_down(monkeypatch) -> 
         detail = "offline"
         latency_ms = 2.0
 
-    monkeypatch.setattr(main_mod.llm_client, "health", lambda: FakeHealth())
-    monkeypatch.setattr(main_mod, "_connector_diagnostics", lambda: {"ok": False, "checks": {}})
-    monkeypatch.setattr(main_mod, "_workspace_health_snapshot", lambda root: {
+    monkeypatch.setattr(system_mod, "llm_client", type("C", (), {"health": staticmethod(lambda: FakeHealth())})())
+    monkeypatch.setattr(system_mod, "connector_diagnostics", lambda: {"ok": False, "checks": {}})
+    monkeypatch.setattr(system_mod, "workspace_health_snapshot", lambda root: {
         "ok": False,
         "workspace_root": str(root),
         "workspace_root_exists": False,
@@ -652,7 +652,7 @@ def test_preflight_readiness_blocked_when_multiple_systems_down(monkeypatch) -> 
         "min_disk_free_mb": 256,
         "writable_hint": False,
     })
-    monkeypatch.setattr(main_mod, "_queue_health_snapshot", lambda session: {
+    monkeypatch.setattr(system_mod, "queue_health_snapshot", lambda session: {
         "ok": False,
         "pending": 500,
         "failed": 10,
@@ -700,9 +700,9 @@ def test_run_and_get_report_include_structured_sections() -> None:
 
 
 def test_research_sources_discovery_and_alerting_flow(monkeypatch) -> None:
-    import sts_monitor.main as main_mod
+    import sts_monitor.helpers as helpers_mod
 
-    monkeypatch.setattr(main_mod, "send_alert_webhook", lambda **kwargs: {"sent": True, "status": "http-200"})
+    monkeypatch.setattr(helpers_mod, "send_alert_webhook", lambda **kwargs: {"sent": True, "status": "http-200"})
 
     source_created = client.post(
         "/research/sources",

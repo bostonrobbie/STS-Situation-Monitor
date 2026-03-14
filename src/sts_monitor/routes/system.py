@@ -7,7 +7,9 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import RedirectResponse
-from sqlmodel import Session, select, func
+from sqlalchemy import select
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from sts_monitor.helpers import (
     connector_diagnostics,

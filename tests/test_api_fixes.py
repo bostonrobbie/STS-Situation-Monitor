@@ -232,7 +232,7 @@ def test_rss_ingest_creates_audit_log(monkeypatch) -> None:
                 metadata={"failed_feeds": []},
             )
 
-    monkeypatch.setattr("sts_monitor.main.RSSConnector", MockRSSConnector)
+    monkeypatch.setattr("sts_monitor.routes.ingestion.RSSConnector", MockRSSConnector)
 
     resp = client.post(
         f"/investigations/{inv_id}/ingest/rss",
@@ -271,7 +271,7 @@ def test_rss_ingest_audit_log_visible_via_api(monkeypatch) -> None:
                 metadata={"failed_feeds": []},
             )
 
-    monkeypatch.setattr("sts_monitor.main.RSSConnector", MockRSSConnector)
+    monkeypatch.setattr("sts_monitor.routes.ingestion.RSSConnector", MockRSSConnector)
 
     client.post(
         f"/investigations/{inv_id}/ingest/rss",
