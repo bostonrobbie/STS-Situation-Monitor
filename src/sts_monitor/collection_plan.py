@@ -10,9 +10,8 @@ Inspired by intelligence community collection management practices:
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -66,6 +65,17 @@ DEFAULT_CONNECTOR_CONFIGS: dict[str, dict[str, Any]] = {
     "reddit": {
         "per_subreddit_limit": 25,
         "sort": "new",
+    },
+    "nitter": {
+        "per_account_limit": 20,
+    },
+    "web_scraper": {
+        "max_depth": 2,
+        "max_pages": 50,
+        "delay_between_requests_s": 1.0,
+    },
+    "search": {
+        "max_results": 20,
     },
 }
 
@@ -270,6 +280,36 @@ def build_collection_plan(
             filters={"feed_urls": [f["url"] for f in feeds]},
         ))
 
+    # Always include Twitter/Nitter monitoring
+    nitter_cats: list[str] = ["geopolitics"]
+    if any(kw in topic_lower for kw in conflict_kw):
+        nitter_cats.append("conflict")
+    if any(kw in topic_lower for kw in {"osint", "investigation", "intelligence"}):
+        nitter_cats.append("osint")
+    if any(kw in topic_lower for kw in earthquake_kw | fire_kw | weather_kw | disaster_kw):
+        nitter_cats.append("natural_disaster")
+    requirements.append(CollectionRequirement(
+        name=f"Twitter/Nitter: {query[:40]}",
+        description=f"Monitor Twitter via Nitter for: {investigation_topic}",
+        investigation_id="",
+        connectors=["nitter"],
+        query=query,
+        priority=priority,
+        interval_seconds=1800,
+        filters={"categories": list(set(nitter_cats))},
+    ))
+
+    # Always include web search
+    requirements.append(CollectionRequirement(
+        name=f"Web Search: {query[:40]}",
+        description=f"Search the web for: {investigation_topic}",
+        investigation_id="",
+        connectors=["search"],
+        query=query,
+        priority=priority - 5,
+        interval_seconds=3600,
+    ))
+
     return requirements
 
 
@@ -282,7 +322,7 @@ For each story, provide:
 1. A concise headline (under 100 chars)
 2. Why it matters (1-2 sentences)
 3. Suggested search terms
-4. Which data sources to monitor (from: gdelt, usgs, nasa_firms, acled, nws, fema, rss, reddit)
+4. Which data sources to monitor (from: gdelt, usgs, nasa_firms, acled, nws, fema, rss, reddit, nitter, search, web_scraper)
 5. Priority (1-100, where 100 is most urgent)
 
 Recent observations:

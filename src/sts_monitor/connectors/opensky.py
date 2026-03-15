@@ -109,8 +109,8 @@ class OpenSkyConnector:
             is_military_squawk = squawk in ("7500", "7600", "7700")  # Hijack, radio fail, emergency
             reliability = 0.92 if is_military_squawk else 0.70
 
-            alt_str = f"alt {baro_altitude:.0f}m" if baro_altitude else "ground" if on_ground else "unknown alt"
-            vel_str = f"{velocity:.0f}m/s" if velocity else ""
+            alt_str = f"alt {baro_altitude:.0f}m" if baro_altitude is not None else "ground" if on_ground else "unknown alt"
+            vel_str = f"{velocity:.0f}m/s" if velocity is not None else ""
 
             claim = f"Aircraft {callsign or icao24} ({origin_country}) at ({latitude:.4f}, {longitude:.4f}) {alt_str}"
             if vel_str:

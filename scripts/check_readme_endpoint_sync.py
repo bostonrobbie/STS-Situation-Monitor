@@ -8,6 +8,7 @@ import sys
 
 README = Path("README.md")
 MAIN = Path("src/sts_monitor/main.py")
+ROUTES_DIR = Path("src/sts_monitor/routes")
 ENDPOINT_LINE = re.compile(r"^- `(?:GET|POST|PATCH|PUT|DELETE) ([^`]+)`", re.M)
 PATH_PARAM = re.compile(r"\{[^/{}]+\}")
 
@@ -21,7 +22,7 @@ def collect_readme_endpoints(text: str) -> set[str]:
     return {normalize_endpoint(m.group(1).strip()) for m in ENDPOINT_LINE.finditer(text)}
 
 
-def collect_code_endpoints(text: str) -> set[str]:
+def _collect_endpoints_from_ast(text: str, obj_names: set[str]) -> set[str]:
     tree = ast.parse(text)
     endpoints: set[str] = set()
     for node in tree.body:
@@ -33,12 +34,21 @@ def collect_code_endpoints(text: str) -> set[str]:
             fn = dec.func
             if not isinstance(fn, ast.Attribute):
                 continue
-            if not isinstance(fn.value, ast.Name) or fn.value.id != "app":
+            if not isinstance(fn.value, ast.Name) or fn.value.id not in obj_names:
                 continue
             if fn.attr not in {"get", "post", "patch", "put", "delete"}:
                 continue
             if dec.args and isinstance(dec.args[0], ast.Constant) and isinstance(dec.args[0].value, str):
                 endpoints.add(dec.args[0].value)
+    return endpoints
+
+
+def collect_code_endpoints(main_text: str) -> set[str]:
+    endpoints = _collect_endpoints_from_ast(main_text, {"app"})
+    if ROUTES_DIR.is_dir():
+        for route_file in sorted(ROUTES_DIR.glob("*.py")):
+            text = route_file.read_text(encoding="utf-8")
+            endpoints |= _collect_endpoints_from_ast(text, {"router"})
     return {normalize_endpoint(endpoint) for endpoint in endpoints}
 
 
@@ -47,7 +57,7 @@ def main() -> int:
     main_text = MAIN.read_text(encoding="utf-8")
 
     readme_eps = collect_readme_endpoints(readme_text)
-    code_eps = collect_code_endpoints(main_text)
+    code_eps = collect_code_endpoints(main_text if MAIN.exists() else "")
 
     missing = sorted(ep for ep in readme_eps if ep not in code_eps)
     if missing:

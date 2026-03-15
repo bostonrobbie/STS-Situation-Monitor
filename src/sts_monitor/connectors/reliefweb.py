@@ -110,10 +110,10 @@ class ReliefWebConnector:
             fields = report.get("fields", {})
             title = fields.get("title", "")
             url_alias = fields.get("url_alias", "")
-            date_created = fields.get("date", {}).get("created", "")
-            sources = fields.get("source", [])
-            countries = fields.get("country", [])
-            primary_country = fields.get("primary_country", {})
+            date_created = (fields.get("date") or {}).get("created", "")
+            sources = fields.get("source") or []
+            countries = fields.get("country") or []
+            primary_country = fields.get("primary_country") or {}
             formats = fields.get("format", [])
             disaster_types = fields.get("disaster_type", [])
 

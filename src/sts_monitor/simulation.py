@@ -33,14 +33,14 @@ def generate_simulated_observations(topic: str, batch_size: int = 20, include_no
                     claim=f"{topic} !!! clickbait shocking secret",
                     url="https://simulated.local/noise/1",
                     captured_at=now,
-                    reliability_hint=-0.2,
+                    reliability_hint=0.0,
                 ),
                 Observation(
                     source="simulated:noise",
                     claim=f"{topic} generic repost",
                     url="https://simulated.local/noise/2",
                     captured_at=now,
-                    reliability_hint=1.2,
+                    reliability_hint=1.0,
                 ),
             ]
         )

@@ -7,7 +7,6 @@ API docs: https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from urllib.parse import quote_plus
 
 import httpx
 
@@ -30,7 +29,7 @@ def _domain_reliability(domain: str) -> float:
     """Return reliability hint based on domain reputation."""
     domain = domain.lower().strip()
     for known, score in _TRUSTED_DOMAINS.items():
-        if domain.endswith(known):
+        if domain == known or domain.endswith("." + known):
             return score
     return 0.55
 
@@ -98,8 +97,8 @@ class GDELTConnector:
             title = article.get("title", "").strip()
             domain = article.get("domain", "")
             seendate = article.get("seendate", "")
-            source_country = article.get("sourcecountry", "")
-            language = article.get("language", "")
+            _source_country = article.get("sourcecountry", "")
+            _language = article.get("language", "")
 
             if not title or not url:
                 continue

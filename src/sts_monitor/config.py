@@ -7,13 +7,11 @@ class Settings:
     env: str = os.getenv("STS_ENV", "dev")
     api_port: int = int(os.getenv("STS_API_PORT", "8080"))
     database_url: str = os.getenv("STS_DATABASE_URL", "sqlite:///./sts_monitor.db")
-    database_url: str = os.getenv("STS_DATABASE_URL", "postgresql://sts:sts@localhost:5432/sts")
     redis_url: str = os.getenv("STS_REDIS_URL", "redis://localhost:6379/0")
     qdrant_url: str = os.getenv("STS_QDRANT_URL", "http://localhost:6333")
     local_llm_url: str = os.getenv("STS_LOCAL_LLM_URL", "http://localhost:11434")
     local_llm_model: str = os.getenv("STS_LOCAL_LLM_MODEL", "llama3.1")
     local_llm_timeout_s: float = float(os.getenv("STS_LOCAL_LLM_TIMEOUT_S", "10"))
-    workspace_root: str = os.getenv("STS_WORKSPACE_ROOT", ".")
     local_llm_max_retries: int = int(os.getenv("STS_LOCAL_LLM_MAX_RETRIES", "2"))
     workspace_root: str = os.getenv("STS_WORKSPACE_ROOT", ".")
     auth_api_key: str = os.getenv("STS_AUTH_API_KEY", "change-me")
@@ -55,6 +53,28 @@ class Settings:
     windy_api_key: str = os.getenv("STS_WINDY_API_KEY", "")
     webcam_timeout_s: float = float(os.getenv("STS_WEBCAM_TIMEOUT_S", "10"))
     webcam_default_regions: str = os.getenv("STS_WEBCAM_DEFAULT_REGIONS", "")
+    # --- Nitter / Twitter ---
+    nitter_instances: str = os.getenv("STS_NITTER_INSTANCES", "")  # comma-separated
+    nitter_timeout_s: float = float(os.getenv("STS_NITTER_TIMEOUT_S", "12"))
+    nitter_categories: str = os.getenv("STS_NITTER_CATEGORIES", "")  # comma-separated
+    # --- Web scraper ---
+    scraper_timeout_s: float = float(os.getenv("STS_SCRAPER_TIMEOUT_S", "15"))
+    scraper_max_depth: int = int(os.getenv("STS_SCRAPER_MAX_DEPTH", "2"))
+    scraper_max_pages: int = int(os.getenv("STS_SCRAPER_MAX_PAGES", "50"))
+    scraper_delay_s: float = float(os.getenv("STS_SCRAPER_DELAY_S", "1.0"))
+    # --- Search engine ---
+    search_max_results: int = int(os.getenv("STS_SEARCH_MAX_RESULTS", "20"))
+    search_timeout_s: float = float(os.getenv("STS_SEARCH_TIMEOUT_S", "15"))
+    # --- Autonomous research agent ---
+    agent_max_iterations: int = int(os.getenv("STS_AGENT_MAX_ITERATIONS", "5"))
+    agent_max_observations: int = int(os.getenv("STS_AGENT_MAX_OBSERVATIONS", "500"))
+    agent_inter_iteration_delay_s: float = float(os.getenv("STS_AGENT_INTER_ITERATION_DELAY_S", "5"))
+    agent_llm_timeout_s: float = float(os.getenv("STS_AGENT_LLM_TIMEOUT_S", "60"))
+    # --- Embeddings / Semantic search ---
+    embedding_model: str = os.getenv("STS_EMBEDDING_MODEL", "nomic-embed-text")
+    embedding_timeout_s: float = float(os.getenv("STS_EMBEDDING_TIMEOUT_S", "30"))
+    qdrant_timeout_s: float = float(os.getenv("STS_QDRANT_TIMEOUT_S", "15"))
+    qdrant_vector_size: int = int(os.getenv("STS_QDRANT_VECTOR_SIZE", "768"))
 
 
 settings = Settings()

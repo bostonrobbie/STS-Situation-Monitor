@@ -11,14 +11,13 @@ Inspired by GDELT's Daily Trend Report and WorldMonitor's auto-surfacing.
 
 from __future__ import annotations
 
-import json
 import re
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sts_monitor.entities import ExtractedEntity, extract_entities
+from sts_monitor.entities import extract_entities
 
 
 @dataclass(slots=True)

@@ -71,7 +71,12 @@ def detect_convergence(
         return []
 
     cutoff = datetime.now(UTC) - timedelta(hours=time_window_hours)
-    recent = [p for p in geo_points if p.event_time >= cutoff]
+    # Handle both timezone-aware and naive datetimes (SQLite strips tzinfo)
+    cutoff_naive = cutoff.replace(tzinfo=None)
+    recent = [
+        p for p in geo_points
+        if (p.event_time.replace(tzinfo=None) if p.event_time else cutoff_naive) >= cutoff_naive
+    ]
 
     if len(recent) < min_signal_types:
         return []

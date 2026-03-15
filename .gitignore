@@ -4,5 +4,9 @@ __pycache__/
 .env
 *.pyc
 *.egg-info/
+src/*.egg-info/
 *.db
 sts_monitor.db
+.coverage
+htmlcov/
+backups/

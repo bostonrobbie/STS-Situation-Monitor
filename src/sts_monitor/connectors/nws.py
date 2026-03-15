@@ -146,7 +146,7 @@ class NWSAlertConnector:
                     "title": claim[:500],
                     "latitude": lat,
                     "longitude": lon,
-                    "magnitude": list(_SEVERITY_WEIGHT.keys()).index(severity) + 1 if severity in _SEVERITY_WEIGHT else 0,
+                    "magnitude": {"Extreme": 5, "Severe": 4, "Moderate": 3, "Minor": 2, "Unknown": 1}.get(severity, 0),
                     "event_time": captured_at,
                     "expires_at": expires_at,
                     "properties": {

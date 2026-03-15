@@ -244,8 +244,12 @@ def _execute_job(session: Session, job: JobORM, pipeline: SignalPipeline, llm_cl
             GDELTConnector, USGSEarthquakeConnector, NASAFIRMSConnector,
             ACLEDConnector, NWSAlertConnector, FEMADisasterConnector,
             ReliefWebConnector, OpenSkyConnector, WebcamConnector,
+            NitterConnector, WebScraperConnector, SearchConnector,
         )
+        from sts_monitor.connectors.nitter import get_accounts_for_categories
         from sts_monitor.config import settings as _settings
+
+        plan_filters = json.loads(plan.filters_json) if hasattr(plan, "filters_json") and plan.filters_json else {}
 
         connector_map: dict[str, Any] = {
             "gdelt": lambda: GDELTConnector(),
@@ -257,6 +261,16 @@ def _execute_job(session: Session, job: JobORM, pipeline: SignalPipeline, llm_cl
             "reliefweb": lambda: ReliefWebConnector(),
             "opensky": lambda: OpenSkyConnector(),
             "webcams": lambda: WebcamConnector(windy_api_key=_settings.windy_api_key or None),
+            "nitter": lambda: NitterConnector(
+                accounts=get_accounts_for_categories(plan_filters.get("categories")),
+            ),
+            "web_scraper": lambda: WebScraperConnector(
+                seed_urls=plan_filters.get("seed_urls", []),
+                max_depth=_settings.scraper_max_depth,
+                max_pages=_settings.scraper_max_pages,
+                delay_between_requests_s=_settings.scraper_delay_s,
+            ),
+            "search": lambda: SearchConnector(max_results=_settings.search_max_results),
         }
 
         for connector_name in connectors_list:
@@ -290,6 +304,68 @@ def _execute_job(session: Session, job: JobORM, pipeline: SignalPipeline, llm_cl
         session.commit()
         return {"job_type": job.job_type, "plan_id": plan_id, "ingested_count": total_ingested}
 
+    if job.job_type == "run_research_agent":
+        from sts_monitor.research_agent import ResearchAgent
+        from sts_monitor.config import settings as _settings
+        from sts_monitor.online_tools import parse_csv_env
+
+        topic = payload["topic"]
+        seed_query = payload.get("seed_query")
+        agent_session_id = payload.get("session_id", f"job-{job.id}")
+
+        nitter_instances = parse_csv_env(_settings.nitter_instances) or None
+        nitter_cats = parse_csv_env(_settings.nitter_categories) or None
+
+        agent_llm = LocalLLMClient(
+            base_url=_settings.local_llm_url,
+            model=_settings.local_llm_model,
+            timeout_s=_settings.agent_llm_timeout_s,
+            max_retries=_settings.local_llm_max_retries,
+        )
+        agent = ResearchAgent(
+            llm_client=agent_llm,
+            max_iterations=_settings.agent_max_iterations,
+            max_observations=_settings.agent_max_observations,
+            nitter_instances=nitter_instances,
+            nitter_categories=nitter_cats,
+            inter_iteration_delay_s=_settings.agent_inter_iteration_delay_s,
+            scraper_max_depth=_settings.scraper_max_depth,
+            scraper_max_pages=_settings.scraper_max_pages,
+            scraper_delay_s=_settings.scraper_delay_s,
+            search_max_results=_settings.search_max_results,
+        )
+        result_session = agent.run(agent_session_id, topic, seed_query)
+
+        # Store observations in the investigation if linked
+        investigation_id = payload.get("investigation_id")
+        if investigation_id:
+            for obs in result_session.all_observations:
+                session.add(ObservationORM(
+                    investigation_id=investigation_id,
+                    source=obs.source,
+                    claim=obs.claim,
+                    url=obs.url,
+                    captured_at=obs.captured_at,
+                    reliability_hint=obs.reliability_hint,
+                    connector_type="research_agent",
+                ))
+            _record_ingestion_run(
+                session, investigation_id=investigation_id,
+                connector="research_agent",
+                ingested_count=len(result_session.all_observations),
+                failed_count=0, status=result_session.status,
+                detail={"session_id": agent_session_id, "iterations": len(result_session.iterations)},
+            )
+
+        return {
+            "job_type": job.job_type,
+            "session_id": agent_session_id,
+            "status": result_session.status,
+            "iterations": len(result_session.iterations),
+            "observations": len(result_session.all_observations),
+            "findings": len(result_session.all_findings),
+        }
+
     raise ValueError(f"Unsupported job type: {job.job_type}")
 
 
@@ -302,6 +378,7 @@ def process_job(session: Session, job: JobORM, pipeline: SignalPipeline, llm_cli
         session.commit()
         return {"job_id": job.id, "status": job.status, "result": result}
     except Exception as exc:
+        session.rollback()
         job.last_error = str(exc)
         job.updated_at = datetime.now(UTC)
         if job.attempts >= job.max_attempts:
