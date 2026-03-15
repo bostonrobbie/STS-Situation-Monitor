@@ -7,6 +7,7 @@ import pytest
 from datetime import UTC, datetime, timedelta
 from starlette.testclient import TestClient
 
+import sqlalchemy
 from sts_monitor.database import Base, engine
 from sts_monitor.main import app
 
@@ -17,8 +18,16 @@ AUTH = {"X-API-Key": "change-me"}
 def _fresh_db(monkeypatch):
     import sts_monitor.rate_limit as rl
     monkeypatch.setattr(rl, "RATE_LIMIT_ENABLED", False)
+    from sts_monitor.geofence import _custom_zones
+    _custom_zones.clear()
+    with engine.connect() as conn:
+        conn.execute(sqlalchemy.text("PRAGMA foreign_keys = OFF"))
+        conn.commit()
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    with engine.connect() as conn:
+        conn.execute(sqlalchemy.text("PRAGMA foreign_keys = ON"))
+        conn.commit()
 
 
 @pytest.fixture

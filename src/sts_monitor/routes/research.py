@@ -404,6 +404,7 @@ def auto_investigate_convergence(
             status="open",
         )
         session.add(investigation)
+        session.flush()
         zone.investigation_id = inv_id
 
         # Enqueue research agent job
