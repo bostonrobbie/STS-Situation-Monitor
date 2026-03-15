@@ -3,637 +3,944 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>STS Situation Monitor</title>
-<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<title>STS Intelligence Monitor</title>
+<link rel="stylesheet" href="/static/maplibre-gl.css">
 <style>
-:root {
-  --bg-primary: #0a0e17;
-  --bg-secondary: #111827;
-  --bg-card: #1a2332;
-  --border: #2a3a4e;
-  --text-primary: #e5e7eb;
-  --text-secondary: #9ca3af;
-  --accent-blue: #3b82f6;
-  --accent-green: #22c55e;
-  --accent-red: #ef4444;
-  --accent-amber: #f59e0b;
-  --accent-purple: #a855f7;
-  --accent-cyan: #06b6d4;
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg-primary); color: var(--text-primary); overflow: hidden; height: 100vh; }
-
-/* Header */
-.header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); height: 48px; z-index: 100; }
-.header h1 { font-size: 16px; font-weight: 700; letter-spacing: -0.5px; }
-.header h1 span { color: var(--accent-blue); }
-.header-right { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--text-secondary); }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); display: inline-block; animation: pulse 2s infinite; }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-
-/* Layout */
-.layout { display: grid; grid-template-columns: 320px 1fr 360px; grid-template-rows: 1fr; height: calc(100vh - 48px); }
-
-/* Left Panel */
-.left-panel { background: var(--bg-secondary); border-right: 1px solid var(--border); overflow-y: auto; display: flex; flex-direction: column; }
-.panel-section { padding: 12px; border-bottom: 1px solid var(--border); }
-.panel-section h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary); margin-bottom: 8px; }
-
-/* Stats Grid */
-.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
-.stat-value { font-size: 20px; font-weight: 700; }
-.stat-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-value.blue { color: var(--accent-blue); }
-.stat-value.green { color: var(--accent-green); }
-.stat-value.red { color: var(--accent-red); }
-.stat-value.amber { color: var(--accent-amber); }
-.stat-value.purple { color: var(--accent-purple); }
-.stat-value.cyan { color: var(--accent-cyan); }
-
-/* Layer Toggles */
-.layer-toggle { display: flex; align-items: center; gap: 8px; padding: 6px 0; cursor: pointer; font-size: 13px; }
-.layer-toggle input { accent-color: var(--accent-blue); }
-.layer-dot { width: 10px; height: 10px; border-radius: 50%; }
-.layer-count { margin-left: auto; font-size: 11px; color: var(--text-secondary); background: var(--bg-primary); padding: 1px 6px; border-radius: 8px; }
-
-/* Discovered Topics */
-.topic-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 6px; cursor: pointer; transition: border-color 0.2s; }
-.topic-card:hover { border-color: var(--accent-blue); }
-.topic-score { font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
-.topic-score.high { background: rgba(239,68,68,0.2); color: var(--accent-red); }
-.topic-score.medium { background: rgba(245,158,11,0.2); color: var(--accent-amber); }
-.topic-score.low { background: rgba(34,197,94,0.2); color: var(--accent-green); }
-.topic-title { font-size: 12px; font-weight: 600; margin-top: 4px; line-height: 1.4; }
-.topic-meta { font-size: 10px; color: var(--text-secondary); margin-top: 4px; }
-.topic-actions { display: flex; gap: 6px; margin-top: 6px; }
-.btn-sm { font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); cursor: pointer; }
-.btn-sm:hover { background: var(--accent-blue); border-color: var(--accent-blue); }
-.btn-sm.danger:hover { background: var(--accent-red); border-color: var(--accent-red); }
-
-/* Map */
-.map-container { position: relative; }
-#map { width: 100%; height: 100%; }
-.map-overlay { position: absolute; top: 10px; left: 10px; z-index: 10; display: flex; gap: 6px; }
-.map-btn { background: var(--bg-card); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 12px; border-radius: 6px; font-size: 11px; cursor: pointer; }
-.map-btn:hover, .map-btn.active { background: var(--accent-blue); border-color: var(--accent-blue); }
-
-/* Right Panel */
-.right-panel { background: var(--bg-secondary); border-left: 1px solid var(--border); overflow-y: auto; display: flex; flex-direction: column; }
-
-/* Event Feed */
-.event-item { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; transition: background 0.2s; }
-.event-item:hover { background: var(--bg-card); }
-.event-item.new { animation: fadeIn 0.5s; border-left: 3px solid var(--accent-blue); }
-@keyframes fadeIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
-.event-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-.event-layer { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 1px 6px; border-radius: 3px; }
-.event-layer.earthquake { background: rgba(239,68,68,0.2); color: var(--accent-red); }
-.event-layer.fire { background: rgba(245,158,11,0.2); color: var(--accent-amber); }
-.event-layer.conflict { background: rgba(168,85,247,0.2); color: var(--accent-purple); }
-.event-layer.weather_alert { background: rgba(6,182,212,0.2); color: var(--accent-cyan); }
-.event-layer.disaster { background: rgba(59,130,246,0.2); color: var(--accent-blue); }
-.event-layer.humanitarian { background: rgba(34,197,94,0.2); color: var(--accent-green); }
-.event-layer.aircraft { background: rgba(156,163,175,0.2); color: var(--text-secondary); }
-.event-time { font-size: 10px; color: var(--text-secondary); }
-.event-title { line-height: 1.4; color: var(--text-primary); }
-.event-coords { font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
-
-/* Convergence Zones */
-.zone-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 6px; }
-.zone-severity { font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; }
-.zone-severity.critical { background: rgba(239,68,68,0.3); color: var(--accent-red); }
-.zone-severity.high { background: rgba(245,158,11,0.3); color: var(--accent-amber); }
-.zone-severity.medium { background: rgba(59,130,246,0.3); color: var(--accent-blue); }
-.zone-signals { font-size: 11px; margin-top: 4px; }
-.zone-tag { display: inline-block; font-size: 10px; padding: 1px 6px; background: var(--bg-primary); border-radius: 3px; margin: 2px 2px 0 0; }
-
-/* Camera Panel */
-.camera-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px; }
-.camera-thumb { position: relative; border-radius: 6px; overflow: hidden; background: var(--bg-card); border: 1px solid var(--border); aspect-ratio: 16/9; cursor: pointer; }
-.camera-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.camera-thumb .camera-label { position: absolute; bottom: 0; left: 0; right: 0; padding: 4px 6px; background: rgba(0,0,0,0.7); font-size: 9px; }
-.camera-thumb .live-badge { position: absolute; top: 4px; right: 4px; background: var(--accent-red); color: white; font-size: 8px; font-weight: 700; padding: 1px 4px; border-radius: 2px; }
-
-/* Tabs */
-.tab-bar { display: flex; border-bottom: 1px solid var(--border); }
-.tab { flex: 1; padding: 8px; text-align: center; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; color: var(--text-secondary); border-bottom: 2px solid transparent; }
-.tab.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
-.tab-content { display: none; }
-.tab-content.active { display: block; flex: 1; overflow-y: auto; }
-
-/* Timeline */
-.timeline-bar { display: flex; align-items: flex-end; gap: 2px; height: 60px; padding: 0 12px; }
-.timeline-bar .bar { flex: 1; background: var(--accent-blue); border-radius: 2px 2px 0 0; min-height: 2px; transition: height 0.3s; }
-.timeline-bar .bar:hover { background: var(--accent-cyan); }
-.timeline-labels { display: flex; justify-content: space-between; padding: 2px 12px; font-size: 9px; color: var(--text-secondary); }
-
-/* Connector Status */
-.connector-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; font-size: 12px; }
-.connector-status { width: 8px; height: 8px; border-radius: 50%; }
-.connector-status.active { background: var(--accent-green); }
-.connector-status.inactive { background: var(--text-secondary); }
-.connector-status.error { background: var(--accent-red); }
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--bg-primary); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
-
-/* Responsive */
-@media (max-width: 1200px) { .layout { grid-template-columns: 280px 1fr 300px; } }
-@media (max-width: 900px) { .layout { grid-template-columns: 1fr; grid-template-rows: auto 400px auto; } }
+:root{--bg-primary:#050810;--bg-secondary:#0d1117;--bg-card:#161b27;--bg-hover:#1c2333;--border:#21293a;--border-bright:#2d3f58;--text-primary:#e2e8f0;--text-secondary:#64748b;--text-dim:#3d4f66;--accent-blue:#3b82f6;--accent-green:#22c55e;--accent-red:#ef4444;--accent-amber:#f59e0b;--accent-purple:#a855f7;--accent-cyan:#06b6d4;}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,monospace;background:var(--bg-primary);color:var(--text-primary);overflow:hidden;height:100vh;display:flex;flex-direction:column}
+.header{display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--bg-secondary);border-bottom:1px solid var(--border);height:44px;flex-shrink:0;z-index:200}
+.logo{font-size:14px;font-weight:800;letter-spacing:2px}.logo span{color:var(--accent-blue)}
+.sep{width:1px;height:20px;background:var(--border)}
+.hmeta{font-size:11px;color:var(--text-secondary);display:flex;align-items:center;gap:10px}
+.sdot{width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0}
+.sdot.live{background:var(--accent-green);animation:pulse 2s infinite}
+.sdot.err{background:var(--accent-red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.badge{background:var(--bg-card);border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700}
+.badge.red{border-color:rgba(239,68,68,.4);color:var(--accent-red);background:rgba(239,68,68,.08)}
+.badge.blue{border-color:rgba(59,130,246,.4);color:var(--accent-blue);background:rgba(59,130,246,.08)}
+.hright{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:11px;color:var(--text-secondary)}
+.vnav{display:flex;align-items:center;background:var(--bg-secondary);border-bottom:1px solid var(--border);height:36px;flex-shrink:0;padding:0 4px;gap:2px;overflow-x:auto;z-index:100}
+.vbtn{display:flex;align-items:center;gap:5px;padding:4px 12px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;color:var(--text-secondary);white-space:nowrap;transition:all .15s;border:1px solid transparent;background:none}
+.vbtn:hover{color:var(--text-primary);background:var(--bg-card)}
+.vbtn.active{color:var(--text-primary);background:var(--bg-card);border-color:var(--border-bright)}
+.vbtn.active.war{border-color:rgba(239,68,68,.5);color:#fca5a5}
+.vbtn.active.aviation{border-color:rgba(107,114,128,.5);color:#d1d5db}
+.vbtn.active.cameras{border-color:rgba(34,197,94,.5);color:#86efac}
+.vbtn.active.local{border-color:rgba(59,130,246,.5);color:#93c5fd}
+.vbtn.active.briefing{border-color:rgba(168,85,247,.5);color:#d8b4fe}
+.vsep{width:1px;height:18px;background:var(--border);margin:0 4px;flex-shrink:0}
+.layout{display:flex;flex:1;overflow:hidden}
+.lp{width:285px;min-width:285px;background:var(--bg-secondary);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column}
+.map-c{flex:1;position:relative}
+#map{width:100%;height:100%}
+.rp{width:340px;min-width:340px;background:var(--bg-secondary);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.psec{padding:10px 12px;border-bottom:1px solid var(--border)}
+.ptitle{font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:var(--text-secondary);font-weight:700;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+.pact{font-size:10px;color:var(--accent-blue);cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400}
+.pact:hover{text-decoration:underline}
+.sgrid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.scard{background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 9px}
+.sv{font-size:18px;font-weight:700;line-height:1}
+.sl{font-size:9px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+.sv.blue{color:var(--accent-blue)}.sv.green{color:var(--accent-green)}.sv.red{color:var(--accent-red)}.sv.amber{color:var(--accent-amber)}.sv.purple{color:var(--accent-purple)}.sv.cyan{color:var(--accent-cyan)}
+.lgrp{margin-bottom:7px}
+.lgrp-t{font-size:9px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-dim);margin-bottom:3px;font-weight:600}
+.ltog{display:flex;align-items:center;gap:7px;padding:4px 5px;cursor:pointer;border-radius:4px;transition:background .1s}
+.ltog:hover{background:var(--bg-card)}
+.ltog input[type=checkbox]{accent-color:var(--accent-blue);width:13px;height:13px;flex-shrink:0}
+.ldot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.lname{flex:1;font-size:11px}
+.lcnt{font-size:10px;color:var(--text-secondary);background:var(--bg-primary);padding:1px 5px;border-radius:6px}
+.srch{position:relative}
+.srch input{width:100%;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 10px 6px 28px;font-size:12px;color:var(--text-primary);outline:none}
+.srch input:focus{border-color:var(--accent-blue)}
+.srch input::placeholder{color:var(--text-secondary)}
+.sicon{position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--text-secondary);pointer-events:none}
+.th-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.th-btn{background:var(--bg-card);border:1px solid var(--border);border-radius:5px;padding:6px 8px;font-size:11px;cursor:pointer;color:var(--text-primary);text-align:left;transition:all .15s}
+.th-btn:hover{border-color:var(--accent-red)}
+.th-btn.active{background:rgba(239,68,68,.1);border-color:var(--accent-red);color:#fca5a5}
+.th-name{font-weight:600;font-size:11px}
+.th-st{font-size:9px;color:var(--text-secondary);margin-top:2px;display:flex;align-items:center;gap:3px}
+.tdot{width:5px;height:5px;border-radius:50%;background:var(--accent-red);animation:pulse 1.5s infinite}
+.fl-item{padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s}
+.fl-item:hover{background:var(--bg-card)}
+.fl-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px}
+.cs{font-size:12px;font-weight:700;font-family:monospace}
+.fcat{font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase}
+.fcat.military_us{background:rgba(59,130,246,.2);color:#93c5fd}
+.fcat.military_allied{background:rgba(34,197,94,.2);color:#86efac}
+.fcat.military_adversary{background:rgba(239,68,68,.2);color:#fca5a5}
+.fcat.emergency{background:rgba(239,68,68,.4);color:#ef4444;animation:pulse .8s infinite}
+.fcat.interesting{background:rgba(245,158,11,.2);color:#fde68a}
+.fdtl{font-size:10px;color:var(--text-secondary)}
+.crtabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+.crtab{font-size:10px;padding:3px 8px;border-radius:4px;border:1px solid var(--border);cursor:pointer;color:var(--text-secondary)}
+.crtab.active{border-color:var(--accent-green);color:var(--accent-green);background:rgba(34,197,94,.08)}
+.cgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ccard{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;overflow:hidden;cursor:pointer;transition:border-color .2s,transform .15s,box-shadow .15s}
+.ccard:hover{border-color:var(--accent-green);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.4)}
+.cthumb{position:relative;width:100%;padding-top:56.25%;background:#050810;overflow:hidden}
+.cthumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity .3s}
+.cthumb-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px;font-size:24px;background:linear-gradient(135deg,#0d1117,#111827)}
+.cplay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0);transition:background .2s;opacity:0}
+.cplay-btn{width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.9);display:flex;align-items:center;justify-content:center;font-size:14px;transform:scale(.8);transition:transform .15s}
+.ccard:hover .cplay{background:rgba(0,0,0,.5);opacity:1}
+.ccard:hover .cplay-btn{transform:scale(1)}
+.livebadge{position:absolute;top:5px;right:5px;background:#dc2626;color:white;font-size:8px;font-weight:700;padding:2px 5px;border-radius:3px;letter-spacing:.5px;animation:livepulse 2s ease-in-out infinite}
+@keyframes livepulse{0%,100%{opacity:1}50%{opacity:.7}}
+.tbadge{position:absolute;top:5px;left:5px;font-size:8px;padding:2px 5px;border-radius:3px;font-weight:700}
+.tbadge.war{background:rgba(239,68,68,.8);color:white}.tbadge.fire{background:rgba(245,158,11,.8);color:white}.tbadge.traffic{background:rgba(59,130,246,.7);color:white}.tbadge.port{background:rgba(6,182,212,.7);color:white}
+.cinfo{padding:6px 8px 7px}
+.cname{font-size:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-primary)}
+.creg{font-size:9px;color:var(--text-secondary);margin-top:1px;display:flex;align-items:center;gap:4px}
+.lcard{background:var(--bg-card);border:1px solid var(--accent-blue);border-radius:6px;padding:10px;margin-bottom:8px}
+.lname-d{font-size:13px;font-weight:700;color:var(--accent-blue)}
+.lcoords{font-size:10px;color:var(--text-secondary)}
+.lrow{display:flex;gap:6px}
+.linput{flex:1;background:var(--bg-primary);border:1px solid var(--border);border-radius:5px;padding:6px 8px;font-size:11px;color:var(--text-primary);outline:none}
+.linput:focus{border-color:var(--accent-blue)}
+.btnp{background:var(--accent-blue);color:white;border:none;border-radius:5px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer}
+.btnp:hover{background:#2563eb}
+.btns{background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer}
+.btns:hover{background:var(--bg-hover)}
+.brf-c{flex:1;overflow-y:auto;padding:12px}
+.brf-txt{font-size:12px;line-height:1.7}
+.brf-txt h1,.brf-txt h2,.brf-txt h3{color:var(--accent-blue);margin:10px 0 5px;font-size:13px}
+.brf-txt p{margin-bottom:8px}.brf-txt ul{margin:4px 0 8px 16px}.brf-txt li{margin-bottom:3px}
+.brf-txt strong{color:var(--accent-amber)}
+.brf-meta{font-size:10px;color:var(--text-secondary);padding:8px 12px;border-top:1px solid var(--border);flex-shrink:0;display:flex;justify-content:space-between;align-items:center}
+.brf-load{display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;gap:12px;color:var(--text-secondary);font-size:12px}
+.spinner{width:24px;height:24px;border:2px solid var(--border);border-top-color:var(--accent-blue);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.mtbar{position:absolute;top:10px;left:10px;z-index:10;display:flex;gap:5px;flex-wrap:wrap;max-width:400px}
+.mbtn{background:rgba(13,17,23,.9);border:1px solid var(--border);color:var(--text-primary);padding:5px 10px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;backdrop-filter:blur(4px);transition:all .15s}
+.mbtn:hover,.mbtn.active{background:var(--accent-blue);border-color:var(--accent-blue)}
+.minfo{position:absolute;bottom:30px;left:10px;z-index:10;background:rgba(13,17,23,.85);border:1px solid var(--border);border-radius:5px;padding:3px 9px;font-size:10px;color:var(--text-secondary);backdrop-filter:blur(4px)}
+.rppane{display:block;flex:1;overflow-y:auto}
+#rp-ctx{padding:8px 12px;border-bottom:1px solid var(--border);background:rgba(0,0,0,.25);flex-shrink:0}
+#rp-filter-bar{display:flex;gap:4px;padding:6px 10px;flex-shrink:0;flex-wrap:wrap;border-bottom:1px solid var(--border);background:rgba(0,0,0,.1)}
+.rpill{font-size:9px;padding:2px 9px;border-radius:10px;border:1px solid var(--border);cursor:pointer;color:var(--text-secondary);transition:all .15s;user-select:none}
+.rpill.active{border-color:var(--accent-blue);color:var(--accent-blue);background:rgba(59,130,246,.12);font-weight:600}
+.rpill:hover:not(.active){border-color:var(--text-secondary);color:var(--text-primary)}
+#rp-content{flex:1;overflow-y:auto;overflow-x:hidden}
+.rp-section{margin-bottom:2px}
+.rp-sec-hdr{padding:6px 12px;font-size:9px;font-weight:700;color:var(--text-secondary);letter-spacing:1.5px;border-bottom:1px solid var(--border);background:rgba(0,0,0,.15)}
+.evi{padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s}
+.evi:hover{background:var(--bg-hover)}
+.evi.fresh{border-left:2px solid var(--accent-blue);animation:slideIn .3s}
+@keyframes slideIn{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}
+.evh{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;gap:6px}
+.evlayer{font-size:9px;font-weight:700;text-transform:uppercase;padding:1px 5px;border-radius:3px;white-space:nowrap;flex-shrink:0}
+.evtime{font-size:10px;color:var(--text-secondary);white-space:nowrap;flex-shrink:0}
+.evtitle{font-size:11px;line-height:1.4}
+.evdetail{font-size:10px;color:var(--text-secondary);margin-top:2px;display:flex;gap:8px}
+.zcard{background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:9px;margin-bottom:5px;cursor:pointer}
+.zcard:hover{border-color:var(--accent-amber)}
+.zsev{font-size:9px;font-weight:700;text-transform:uppercase;padding:1px 5px;border-radius:3px}
+.zsev.critical{background:rgba(239,68,68,.2);color:var(--accent-red)}
+.zsev.high{background:rgba(245,158,11,.2);color:var(--accent-amber)}
+.zsev.medium{background:rgba(59,130,246,.2);color:var(--accent-blue)}
+.ztag{display:inline-block;font-size:9px;padding:1px 5px;background:var(--bg-primary);border-radius:3px;margin:2px 2px 0 0}
+.tlbars{display:flex;align-items:flex-end;gap:2px;height:48px}
+.tlbar{flex:1;background:var(--accent-blue);opacity:.6;border-radius:2px 2px 0 0;min-height:2px;transition:height .3s;cursor:pointer}
+.tlbar:hover{opacity:1}
+.tllabels{display:flex;justify-content:space-between;font-size:9px;color:var(--text-dim);margin-top:2px}
+.crow{display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:11px}
+.cdot{width:6px;height:6px;border-radius:50%;margin-right:6px;display:inline-block}
+.cdot.ok{background:var(--accent-green)}.cdot.warn{background:var(--accent-amber)}.cdot.err{background:var(--accent-red)}
+.tcard{background:var(--bg-card);border:1px solid var(--border);border-radius:5px;padding:8px;margin-bottom:5px}
+.tscore{font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px}
+.tscore.high{background:rgba(239,68,68,.2);color:var(--accent-red)}.tscore.medium{background:rgba(245,158,11,.2);color:var(--accent-amber)}.tscore.low{background:rgba(34,197,94,.2);color:var(--accent-green)}
+.ttitle{font-size:11px;font-weight:600;margin:3px 0;line-height:1.3}
+.tmeta{font-size:10px;color:var(--text-secondary)}
+.tactions{display:flex;gap:5px;margin-top:5px}
+.btnx{font-size:10px;padding:2px 7px;border-radius:3px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);cursor:pointer}
+.btnx:hover{background:var(--accent-blue);border-color:var(--accent-blue)}
+.btnx.d:hover{background:var(--accent-red);border-color:var(--accent-red)}
+.empty{padding:20px 12px;font-size:11px;color:var(--text-secondary);text-align:center}
+::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}::-webkit-scrollbar-thumb:hover{background:var(--border-bright)}
 </style>
 </head>
 <body>
 
 <div class="header">
-  <h1><span>STS</span> Situation Monitor</h1>
-  <div class="header-right">
-    <span id="sse-status"><span class="status-dot"></span> Live</span>
-    <span id="subscriber-count">0 subscribers</span>
-    <span id="last-update">--</span>
+  <div class="logo"><span>STS</span> INTEL</div>
+  <div class="sep"></div>
+  <div class="hmeta">
+    <span id="sse-status"><span class="sdot live"></span> Live</span>
+    <span id="feature-count" class="badge blue">-- events</span>
+    <span id="emg-badge" class="badge red" style="display:none">&#9888; EMERGENCY</span>
   </div>
+  <div class="hright">
+    <span id="last-update" style="color:var(--text-dim)">--</span>
+    <span id="sse-subs" style="color:var(--text-dim)">0 sub</span>
+  </div>
+</div>
+
+<div class="vnav">
+  <button class="vbtn active" onclick="setView('world')" id="vbtn-world">&#127757; WORLD</button>
+  <button class="vbtn" onclick="setView('war')" id="vbtn-war">&#9876; WAR ZONES</button>
+  <button class="vbtn" onclick="setView('aviation')" id="vbtn-aviation">&#9992; AVIATION</button>
+  <button class="vbtn" onclick="setView('cameras')" id="vbtn-cameras">&#128249; CAMERAS</button>
+  <button class="vbtn" onclick="setView('local')" id="vbtn-local">&#127968; LOCAL</button>
+  <div class="vsep"></div>
+  <button class="vbtn" onclick="setView('briefing')" id="vbtn-briefing">&#128203; BRIEFING</button>
 </div>
 
 <div class="layout">
-  <!-- Left Panel -->
-  <div class="left-panel">
-    <div class="panel-section">
-      <h3>System Overview</h3>
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-value blue" id="stat-investigations">--</div><div class="stat-label">Investigations</div></div>
-        <div class="stat-card"><div class="stat-value green" id="stat-observations">--</div><div class="stat-label">Observations</div></div>
-        <div class="stat-card"><div class="stat-value amber" id="stat-geo-events">--</div><div class="stat-label">Geo Events 24h</div></div>
-        <div class="stat-card"><div class="stat-value red" id="stat-convergence">--</div><div class="stat-label">Active Zones</div></div>
-        <div class="stat-card"><div class="stat-value purple" id="stat-stories">--</div><div class="stat-label">Stories</div></div>
-        <div class="stat-card"><div class="stat-value cyan" id="stat-entities">--</div><div class="stat-label">Entities</div></div>
+  <div class="lp" id="lp-root">
+    <div class="psec">
+      <div class="srch"><span class="sicon">&#128269;</span><input type="text" id="event-search" placeholder="Search events, locations..." oninput="filterEvents(this.value)"></div>
+    </div>
+    <!-- WORLD view left panel -->
+    <div id="lp-world">
+      <div class="psec">
+        <div class="ptitle">Overview</div>
+        <div class="sgrid">
+          <div class="scard"><div class="sv blue" id="s-geo24">--</div><div class="sl">Events 24h</div></div>
+          <div class="scard"><div class="sv green" id="s-obs">--</div><div class="sl">Observations</div></div>
+          <div class="scard"><div class="sv red" id="s-zones">--</div><div class="sl">Hot Zones</div></div>
+          <div class="scard"><div class="sv amber" id="s-sources">--</div><div class="sl">Active Sources</div></div>
+          <div class="scard"><div class="sv purple" id="s-inv">--</div><div class="sl">Investigations</div></div>
+          <div class="scard"><div class="sv cyan" id="s-topics">--</div><div class="sl">New Topics</div></div>
+        </div>
+      </div>
+      <div class="psec"><div class="ptitle">Map Layers</div><div id="layer-toggles"></div></div>
+      <div class="psec">
+        <div class="ptitle">Timeline (48h)</div>
+        <div class="tlbars" id="timeline-bars"></div>
+        <div class="tllabels"><span>-48h</span><span>-24h</span><span>Now</span></div>
+      </div>
+      <div class="psec"><div class="ptitle">Discovered Topics <span class="pact" onclick="runDiscovery()">&#9654; Run</span></div><div id="discovered-topics"></div></div>
+      <div class="psec"><div class="ptitle">Data Sources</div><div id="connector-list"></div></div>
+    </div>
+    <!-- WAR view left panel -->
+    <div id="lp-war" style="display:none">
+      <div class="psec"><div class="ptitle">Active Conflict Zones</div><div class="th-grid" id="theater-grid"></div></div>
+      <div class="psec"><div class="ptitle">War Layers</div><div id="war-layers"></div></div>
+      <div class="psec">
+        <div class="ptitle">Live Stats</div>
+        <div class="sgrid">
+          <div class="scard"><div class="sv red" id="s-conflict">--</div><div class="sl">Conflict</div></div>
+          <div class="scard"><div class="sv amber" id="s-military">--</div><div class="sl">Military</div></div>
+          <div class="scard"><div class="sv blue" id="s-political">--</div><div class="sl">Political</div></div>
+          <div class="scard"><div class="sv cyan" id="s-osint">--</div><div class="sl">OSINT Feeds</div></div>
+        </div>
       </div>
     </div>
-
-    <div class="panel-section">
-      <h3>Map Layers</h3>
-      <div id="layer-toggles"></div>
+    <!-- AVIATION view left panel -->
+    <div id="lp-aviation" style="display:none">
+      <div class="psec">
+        <div class="ptitle">Filter</div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <label class="ltog"><input type="checkbox" id="av-mil" checked onchange="refreshAviation()"><span class="ldot" style="background:#3b82f6"></span><span class="lname">Military US/Allied</span></label>
+          <label class="ltog"><input type="checkbox" id="av-adv" checked onchange="refreshAviation()"><span class="ldot" style="background:#ef4444"></span><span class="lname">Adversary Military</span></label>
+          <label class="ltog"><input type="checkbox" id="av-emg" checked onchange="refreshAviation()"><span class="ldot" style="background:#dc2626"></span><span class="lname">Emergency Squawk</span></label>
+          <label class="ltog"><input type="checkbox" id="av-spc" checked onchange="refreshAviation()"><span class="ldot" style="background:#f59e0b"></span><span class="lname">Special Mission</span></label>
+          <label class="ltog"><input type="checkbox" id="av-all" onchange="refreshAviation()"><span class="ldot" style="background:#6b7280"></span><span class="lname">All Civilian</span></label>
+        </div>
+      </div>
+      <div class="psec">
+        <div class="ptitle">Stats</div>
+        <div class="sgrid">
+          <div class="scard"><div class="sv blue" id="s-av-mil">--</div><div class="sl">Military</div></div>
+          <div class="scard"><div class="sv red" id="s-av-emg">--</div><div class="sl">Emergency</div></div>
+          <div class="scard"><div class="sv amber" id="s-av-spc">--</div><div class="sl">Special</div></div>
+          <div class="scard"><div class="sv green" id="s-av-tot">--</div><div class="sl">Visible</div></div>
+        </div>
+      </div>
+      <div class="psec"><div class="ptitle">Sources</div><div style="font-size:11px;color:var(--text-secondary);line-height:1.7"><div>&#x2022; adsb.lol /v2/mil — 168+ live military</div><div>&#x2022; OpenSky Network (fallback)</div><div>&#x2022; Emergency squawk 7500/7600/7700</div><div style="margin-top:6px;font-size:10px;color:var(--text-dim)">Last update: <span id="flight-last-update">--</span></div><div style="font-size:10px;color:var(--text-dim)">Auto-refreshes every 60s</div></div></div>
     </div>
-
-    <div class="panel-section">
-      <h3>Timeline (48h)</h3>
-      <div class="timeline-bar" id="timeline-bars"></div>
-      <div class="timeline-labels"><span>-48h</span><span>-24h</span><span>Now</span></div>
+    <!-- CAMERAS view left panel -->
+    <div id="lp-cameras" style="display:none">
+      <div class="psec"><div class="ptitle">Camera Categories</div><div class="crtabs" id="cam-region-tabs"></div></div>
+      <div class="psec"><div class="ptitle">Stats</div><div class="sgrid"><div class="scard"><div class="sv green" id="s-cam-tot">--</div><div class="sl">Total Feeds</div></div><div class="scard"><div class="sv red" id="s-cam-war">--</div><div class="sl">War Zone</div></div></div></div>
+      <div class="psec"><div class="ptitle">About</div><div style="font-size:11px;color:var(--text-secondary);line-height:1.6">All feeds are YouTube live streams — always playable. Click any camera card to open the full player.</div>
+        <button class="btns" style="margin-top:8px;width:100%;font-size:10px" onclick="_camerasData=null;loadCameraGrid()">&#8635; Reload Cameras</button>
+      </div>
     </div>
-
-    <div class="panel-section">
-      <h3>Discovered Topics</h3>
-      <div style="margin-bottom:8px"><button class="btn-sm" onclick="runDiscovery()">Run Discovery</button></div>
-      <div id="discovered-topics"></div>
+    <!-- LOCAL view left panel -->
+    <div id="lp-local" style="display:none">
+      <div class="psec">
+        <div class="ptitle">Your Location</div>
+        <div id="local-loc-card"></div>
+        <div style="margin-top:8px"><div class="lrow"><input type="text" id="local-city" class="linput" placeholder="City, State or Zip Code"><button class="btnp" onclick="setLocalLoc()">Set</button></div>
+        <div style="margin-top:5px;display:flex;gap:5px"><button class="btns" style="font-size:10px" onclick="detectGPS()">&#128205; GPS</button><button class="btns" style="font-size:10px" onclick="clearLoc()">Clear</button></div></div>
+      </div>
+      <div class="psec"><div class="ptitle">Coverage Scope</div>
+        <div style="display:flex;gap:5px">
+          <button id="scope-city" class="btns" style="flex:1;font-size:10px;border-color:var(--accent-blue);color:var(--accent-blue)" onclick="setLocalScope('city')">📍 City</button>
+          <button id="scope-state" class="btns" style="flex:1;font-size:10px" onclick="setLocalScope('state')">🗺 State</button>
+        </div>
+        <div style="font-size:9px;color:var(--text-dim);margin-top:4px" id="scope-desc">Events near the selected city only</div>
+      </div>
+      <div class="psec"><div class="ptitle">Radius</div><div style="display:flex;gap:5px;flex-wrap:wrap" id="radius-btns"><button class="btns" data-km="25" onclick="setRadius(25,this)">25km</button><button class="btns" data-km="100" onclick="setRadius(100,this)">100km</button><button class="btns" data-km="250" onclick="setRadius(250,this)">250km</button><button class="btns active" data-km="500" onclick="setRadius(500,this)">500km</button></div></div>
+      <div class="psec"><div class="ptitle">Local Layers</div><div id="local-layers"></div><span id="local-fresh-badge" style="font-size:10px;color:var(--accent-green);margin-top:6px;display:block"></span></div>
     </div>
-
-    <div class="panel-section">
-      <h3>Data Sources</h3>
-      <div id="connector-status"></div>
+    <!-- BRIEFING view left panel -->
+    <div id="lp-briefing" style="display:none">
+      <div class="psec"><div class="ptitle">Intelligence Briefing</div><div style="display:flex;flex-direction:column;gap:7px"><button class="btnp" onclick="loadBriefing(true)">&#128260; Generate New Briefing</button><div style="font-size:10px;color:var(--text-secondary);line-height:1.6">Uses Ollama qwen2.5:14b locally to synthesize recent global events into a classified-style intelligence summary.</div></div></div>
+      <div class="psec"><div class="sgrid"><div class="scard"><div class="sv amber" id="s-brf-evts">--</div><div class="sl">Events Used</div></div><div class="scard"><div class="sv cyan" id="s-brf-cache">--</div><div class="sl">Cache</div></div></div></div>
     </div>
   </div>
 
-  <!-- Map -->
-  <div class="map-container">
+  <div class="map-c">
     <div id="map"></div>
-    <div class="map-overlay">
-      <button class="map-btn active" onclick="setMapStyle('dark')">Dark</button>
-      <button class="map-btn" onclick="setMapStyle('satellite')">Satellite</button>
-      <button class="map-btn" onclick="detectConvergence()">Detect Convergence</button>
-      <button class="map-btn" onclick="refreshAllLayers()">Refresh All</button>
+    <div class="mtbar">
+      <button class="mbtn active" onclick="setMapStyle('dark',this)" data-style="dark">Dark</button>
+      <button class="mbtn" onclick="setMapStyle('satellite',this)" data-style="satellite">Satellite</button>
+      <button class="mbtn active" id="heat-btn" onclick="toggleHeat(this)">Heatmap</button>
+      <button class="mbtn" onclick="detectConvergence()">&#8853; Convergence</button>
+      <button class="mbtn" onclick="refreshAll()">&#8635; Refresh</button>
     </div>
+    <div class="minfo">zoom: <span id="map-zoom">2.5</span> | <span id="map-ctr">20.0, 25.0</span></div>
   </div>
 
-  <!-- Right Panel -->
-  <div class="right-panel">
-    <div class="tab-bar">
-      <div class="tab active" onclick="switchTab('events')">Events</div>
-      <div class="tab" onclick="switchTab('zones')">Zones</div>
-      <div class="tab" onclick="switchTab('cameras')">Cameras</div>
-      <div class="tab" onclick="switchTab('alerts')">Alerts</div>
-    </div>
-    <div class="tab-content active" id="tab-events">
-      <div id="event-feed"></div>
-    </div>
-    <div class="tab-content" id="tab-zones">
-      <div style="padding:12px" id="convergence-zones"></div>
-    </div>
-    <div class="tab-content" id="tab-cameras">
-      <div class="panel-section">
-        <h3>Live Camera Feeds</h3>
-        <p style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Public webcams near active zones</p>
+  <div class="rp">
+    <!-- Context header: shows what area/view is active -->
+    <div id="rp-ctx">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <span id="rp-ctx-label" style="font-weight:700;font-size:11px;letter-spacing:.5px;color:var(--accent-blue)">🌍 WORLD OVERVIEW</span>
+        <span id="rp-ctx-count" style="font-size:10px;color:var(--text-secondary);white-space:nowrap">— events</span>
       </div>
-      <div class="camera-grid" id="camera-feeds"></div>
+      <div id="rp-ctx-bbox" style="font-size:9px;color:var(--text-dim);margin-top:2px"></div>
     </div>
-    <div class="tab-content" id="tab-alerts">
-      <div id="alert-feed" style="padding:12px"></div>
+    <!-- Filter pills: replace sub-tabs -->
+    <div id="rp-filter-bar">
+      <span class="rpill active" data-f="all" onclick="setRpFilter('all')">All</span>
+      <span class="rpill" data-f="news" onclick="setRpFilter('news')">📰 News</span>
+      <span class="rpill" data-f="social" onclick="setRpFilter('social')">📡 Social</span>
+      <span class="rpill" data-f="cams" onclick="setRpFilter('cams')">📹 Cams</span>
+      <span class="rpill" data-f="alerts" onclick="setRpFilter('alerts')">⚡ Alerts</span>
+      <span class="rpill" data-f="zones" onclick="setRpFilter('zones')">⊕ Zones</span>
+    </div>
+    <!-- Unified scrollable content -->
+    <div id="rp-content">
+      <!-- Camera section -->
+      <div id="rp-cams-section" class="rp-section">
+        <div id="rp-cam-tabs" style="padding:6px 8px 0;display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--border)"></div>
+        <div><div class="cgrid" style="padding:8px" id="camera-feeds"></div></div>
+      </div>
+      <!-- Convergence zones section -->
+      <div id="rp-zones-section" class="rp-section" style="display:none">
+        <div class="rp-sec-hdr">⊕ CONVERGENCE ZONES</div>
+        <div style="padding:4px 8px" id="convergence-zones"></div>
+      </div>
+      <!-- Main event feed -->
+      <div id="rp-feed-section" class="rp-section">
+        <div id="event-feed"></div>
+      </div>
+      <!-- Alert feed -->
+      <div id="rp-alerts-section" class="rp-section" style="display:none">
+        <div class="rp-sec-hdr">⚡ ALERTS</div>
+        <div id="alert-feed"></div>
+      </div>
+    </div>
+    <!-- Briefing panel (only shown in BRIEFING view) -->
+    <div id="rp-briefing" style="display:none;flex:1;flex-direction:column;overflow:hidden">
+      <div class="brf-c" id="brf-body">
+        <div class="brf-load" id="brf-loading"><div class="spinner"></div><span>Generating intelligence briefing...</span><span style="font-size:10px;color:var(--text-dim)">30-90 seconds (local LLM)</span></div>
+        <div class="brf-txt" id="brf-text" style="display:none"></div>
+      </div>
+      <div class="brf-meta"><span id="brf-ts">Not yet generated</span><button class="btnx" onclick="loadBriefing(true)">&#8635; Refresh</button></div>
     </div>
   </div>
 </div>
 
-<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="/static/maplibre-gl.js"></script>
 <script>
-const API_BASE = window.location.origin;
-const API_KEY = new URLSearchParams(window.location.search).get('key') || 'change-me';
-const HEADERS = { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' };
+const API_BASE=window.location.origin;
+const API_KEY=new URLSearchParams(window.location.search).get('key')||document.querySelector('meta[name="sts-api-key"]')?.content||'change-me';
+const HEADERS={'X-API-Key':API_KEY,'Content-Type':'application/json'};
 
-// Layer colors
-const LAYER_COLORS = {
-  earthquake: '#ef4444', fire: '#f59e0b', conflict: '#a855f7',
-  weather_alert: '#06b6d4', disaster: '#3b82f6', humanitarian: '#22c55e',
-  aircraft: '#6b7280', unknown: '#9ca3af',
+const LAYERS={
+  earthquake:{color:'#ef4444',group:'Geophysical',icon:'&#9889;',label:'Earthquakes'},
+  fire:{color:'#f59e0b',group:'Geophysical',icon:'&#128293;',label:'Wildfires'},
+  weather_alert:{color:'#06b6d4',group:'Geophysical',icon:'&#9928;',label:'Weather'},
+  disaster:{color:'#3b82f6',group:'Geophysical',icon:'&#9888;',label:'Disaster'},
+  conflict:{color:'#dc2626',group:'Intelligence',icon:'&#9876;',label:'Conflict'},
+  military:{color:'#7f1d1d',group:'Intelligence',icon:'&#129332;',label:'Military'},
+  conspiracy:{color:'#7c3aed',group:'Intelligence',icon:'&#128065;',label:'Conspiracy'},
+  news:{color:'#f97316',group:'Information',icon:'&#128240;',label:'News'},
+  political:{color:'#1d4ed8',group:'Information',icon:'&#127963;',label:'Political'},
+  social_media:{color:'#ec4899',group:'Information',icon:'&#128241;',label:'Social Media'},
+  social_intel:{color:'#a855f7',group:'Information',icon:'&#129488;',label:'LLM Intel Signals'},
+  telegram:{color:'#0ea5e9',group:'Information',icon:'&#128225;',label:'Telegram OSINT'},
+  health_alert:{color:'#10b981',group:'Health',icon:'&#127973;',label:'Health Alert'},
+  humanitarian:{color:'#22c55e',group:'Health',icon:'&#9877;',label:'Humanitarian'},
+  aircraft:{color:'#6b7280',group:'Infrastructure',icon:'&#9992;',label:'Aircraft'},
+  aircraft_military:{color:'#60a5fa',group:'Infrastructure',icon:'&#128745;',label:'Military Aircraft'},
+  aircraft_emergency:{color:'#ef4444',group:'Infrastructure',icon:'&#128680;',label:'Emergency Aircraft'},
+  maritime:{color:'#0ea5e9',group:'Infrastructure',icon:'&#128674;',label:'Maritime'},
+  cyber:{color:'#fbbf24',group:'Infrastructure',icon:'&#128187;',label:'Cyber'},
+  camera:{color:'#22c55e',group:'Infrastructure',icon:'&#128249;',label:'Cameras'},
+  local_news:{color:'#84cc16',group:'Information',icon:'&#128240;',label:'Local News'},
 };
 
-const LAYER_ICONS = {
-  earthquake: '&#9650;', fire: '&#128293;', conflict: '&#9876;',
-  weather_alert: '&#9729;', disaster: '&#9888;', humanitarian: '&#10010;',
-  aircraft: '&#9992;',
+const THEATERS={
+  all_zones:{name:'&#127757; Global War',center:[20,25],zoom:2.5,bbox:null,layers:['conflict','military','telegram','news','political','social_media','humanitarian']},
+  ukraine:{name:'Ukraine',center:[31,49],zoom:6,bbox:[22,44,40,52],layers:['conflict','military','telegram','news','political']},
+  middle_east:{name:'Middle East',center:[36,32],zoom:5,bbox:[33,27,52,38],layers:['conflict','military','political','news','telegram','maritime']},
+  iran:{name:'Iran / Hormuz',center:[53,31],zoom:5,bbox:[44,24,64,40],layers:['conflict','military','political','maritime','aircraft','news']},
+  taiwan:{name:'Taiwan Strait',center:[121,24],zoom:6,bbox:[117,19,126,31],layers:['conflict','military','political','aircraft','maritime']},
+  korea:{name:'Korean Peninsula',center:[127,37],zoom:6,bbox:[124,33,131,43],layers:['conflict','military','political']},
+  sudan:{name:'Sudan',center:[30,15],zoom:5,bbox:[22,8,39,23],layers:['conflict','humanitarian','news']},
+  myanmar:{name:'Myanmar',center:[96,20],zoom:5,bbox:[92,15,101,28],layers:['conflict','humanitarian','news']},
 };
 
-let map, geoJsonData = { type: 'FeatureCollection', features: [] };
-let activeLayers = new Set(['earthquake', 'fire', 'conflict', 'weather_alert', 'disaster', 'humanitarian']);
-let eventFeedItems = [];
+// Camera data is now loaded from /dashboard/cameras API endpoint
+let _camerasData = null;
 
-// ── Map Setup ──────────────────────────────────────────────────────────
+let currentView='world',currentTheater=null,localRadius=500,searchQuery='';
+let userLocation=null;try{userLocation=JSON.parse(localStorage.getItem('userLocation'));}catch(e){}
+let activeLayers=new Set(['earthquake','fire','weather_alert','conflict','military','news','political','humanitarian','disaster','health_alert','cyber']);
+let map,geoJsonData={type:'FeatureCollection',features:[]};
+let heatOn=true,currentCamReg='traffic_cities';
+let currentRpFilter='all',localScope='city';
+let flightRefreshInterval=null;
 
-function initMap() {
-  map = new maplibregl.Map({
-    container: 'map',
-    style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-    center: [30, 20],
-    zoom: 2.5,
-    attributionControl: false,
-  });
-  map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+async function apiFetch(p,o={}){try{const r=await fetch(API_BASE+p,{headers:HEADERS,...o});if(!r.ok)throw new Error(r.status);return await r.json();}catch(e){console.warn('API',p,e.message);return null;}}
+function esc(t){const d=document.createElement('div');d.textContent=t||'';return d.innerHTML;}
+function ago(iso){if(!iso)return'';const s=(Date.now()-new Date(iso))/1000;if(s<60)return Math.round(s)+'s';if(s<3600)return Math.round(s/60)+'m';if(s<86400)return Math.round(s/3600)+'h';return Math.round(s/86400)+'d';}
+function lc(l){return(LAYERS[l]||{}).color||'#9ca3af';}
 
-  map.on('load', () => {
-    map.addSource('events', { type: 'geojson', data: geoJsonData });
+function buildColorExpr(){const e=['match',['get','layer']];for(const[l,c]of Object.entries(LAYERS))e.push(l,c.color);e.push('#9ca3af');return e;}
+function buildSizeExpr(){return['interpolate',['linear'],['zoom'],2,5,6,8,10,12,14,16];}
 
-    // Heatmap layer
-    map.addLayer({
-      id: 'events-heat', type: 'heatmap', source: 'events',
-      paint: {
-        'heatmap-weight': ['interpolate', ['linear'], ['get', 'magnitude'], 0, 0.3, 8, 1],
-        'heatmap-intensity': 0.6, 'heatmap-radius': 30, 'heatmap-opacity': 0.5,
-        'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
-          0, 'rgba(0,0,0,0)', 0.2, '#3b82f6', 0.4, '#06b6d4', 0.6, '#f59e0b', 0.8, '#ef4444', 1, '#ffffff'],
-      },
+function initMap(){
+  map=new maplibregl.Map({container:'map',style:'/static/map-style.json',center:[20,25],zoom:2.5,attributionControl:false});
+  map.addControl(new maplibregl.NavigationControl({showCompass:true}),'bottom-right');
+  map.on('load',()=>{
+    map.addSource('events',{type:'geojson',data:geoJsonData});
+    map.addLayer({id:'events-heat',type:'heatmap',source:'events',paint:{'heatmap-weight':['interpolate',['linear'],['get','magnitude'],0,0.2,10,1],'heatmap-intensity':['interpolate',['linear'],['zoom'],0,0.5,9,1.5],'heatmap-radius':['interpolate',['linear'],['zoom'],0,15,9,40],'heatmap-opacity':0.45,'heatmap-color':['interpolate',['linear'],['heatmap-density'],0,'rgba(0,0,0,0)',.15,'#1d4ed8',.4,'#7c3aed',.6,'#f59e0b',.8,'#ef4444',1,'#fff']}});
+    map.addLayer({id:'events-circle',type:'circle',source:'events',paint:{'circle-radius':buildSizeExpr(),'circle-color':buildColorExpr(),'circle-opacity':0.85,'circle-stroke-width':1,'circle-stroke-color':'rgba(255,255,255,.25)'}});
+    map.on('click','events-circle',e=>{
+      const p=e.features[0].properties;const pr=JSON.parse(p.properties_json||'{}');
+      let ex='';
+      if(pr.url)ex+=`<br><a href="${pr.url}" target="_blank" style="color:#3b82f6">&#128279; Open Feed</a>`;
+      if(pr.adsb_url)ex+=`<br><a href="${pr.adsb_url}" target="_blank" style="color:#3b82f6">&#9992; ADS-B Exchange</a>`;
+      if(pr.callsign)ex+=`<br>Callsign: <b>${pr.callsign}</b>`;
+      if(pr.label)ex+=`<br>${pr.label}`;
+      if(pr.squawk&&pr.squawk!='0')ex+=`<br>Squawk: <b>${pr.squawk}</b>`;
+      const col=lc(p.layer);
+      new maplibregl.Popup({maxWidth:'280px'}).setLngLat(e.lngLat).setHTML(`<div style="color:#111;font-family:sans-serif;font-size:12px;max-width:260px"><div style="font-weight:700;margin-bottom:4px">${esc((p.title||'').substring(0,130))}</div><div style="font-size:11px;color:#555">Layer: <span style="color:${col};font-weight:700">${p.layer}</span>${p.magnitude?` | ${p.layer==='earthquake'?'M':'&#9889;'}${Number(p.magnitude).toFixed(1)}`:''}</div><div style="font-size:10px;color:#888;margin-top:2px">${ago(p.event_time)} ago</div>${ex}</div>`).addTo(map);
     });
-
-    // Circle layer
-    map.addLayer({
-      id: 'events-circle', type: 'circle', source: 'events',
-      paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 4, 8, 8, 14, 14],
-        'circle-color': ['match', ['get', 'layer'],
-          'earthquake', '#ef4444', 'fire', '#f59e0b', 'conflict', '#a855f7',
-          'weather_alert', '#06b6d4', 'disaster', '#3b82f6', 'humanitarian', '#22c55e',
-          'aircraft', '#6b7280', '#9ca3af'],
-        'circle-opacity': 0.8,
-        'circle-stroke-width': 1,
-        'circle-stroke-color': 'rgba(255,255,255,0.3)',
-      },
-    });
-
-    // Popup on click
-    map.on('click', 'events-circle', (e) => {
-      const f = e.features[0];
-      const p = f.properties;
-      const html = `<div style="color:#000;max-width:250px">
-        <strong>${p.title || 'Event'}</strong><br>
-        <small>Layer: ${p.layer} | ${p.event_time || ''}</small>
-        ${p.magnitude ? '<br>Magnitude: ' + p.magnitude : ''}
-      </div>`;
-      new maplibregl.Popup().setLngLat(e.lngLat).setHTML(html).addTo(map);
-    });
-    map.on('mouseenter', 'events-circle', () => map.getCanvas().style.cursor = 'pointer');
-    map.on('mouseleave', 'events-circle', () => map.getCanvas().style.cursor = '');
-
+    map.on('mouseenter','events-circle',()=>map.getCanvas().style.cursor='pointer');
+    map.on('mouseleave','events-circle',()=>map.getCanvas().style.cursor='');
     loadMapData();
+    let mt=null;
+    map.on('moveend',()=>{clearTimeout(mt);mt=setTimeout(loadMapData,500);document.getElementById('map-zoom').textContent=map.getZoom().toFixed(1);const c=map.getCenter();document.getElementById('map-ctr').textContent=c.lat.toFixed(2)+','+c.lng.toFixed(2);updateRpContext();});
   });
 }
 
-function setMapStyle(style) {
-  const styles = {
-    dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-    satellite: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
-  };
-  document.querySelectorAll('.map-btn').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
-  map.setStyle(styles[style] || styles.dark);
-  map.once('style.load', () => {
-    map.addSource('events', { type: 'geojson', data: geoJsonData });
-    map.addLayer({ id: 'events-heat', type: 'heatmap', source: 'events', paint: { 'heatmap-weight': ['interpolate', ['linear'], ['get', 'magnitude'], 0, 0.3, 8, 1], 'heatmap-intensity': 0.6, 'heatmap-radius': 30, 'heatmap-opacity': 0.5 } });
-    map.addLayer({ id: 'events-circle', type: 'circle', source: 'events', paint: { 'circle-radius': 6, 'circle-color': ['match', ['get', 'layer'], 'earthquake', '#ef4444', 'fire', '#f59e0b', 'conflict', '#a855f7', 'weather_alert', '#06b6d4', 'disaster', '#3b82f6', 'humanitarian', '#22c55e', '#9ca3af'], 'circle-opacity': 0.8, 'circle-stroke-width': 1, 'circle-stroke-color': 'rgba(255,255,255,0.3)' } });
-  });
+function setMapStyle(s,btn){
+  const styles={dark:'/static/map-style.json',satellite:'/static/map-style.json'};
+  document.querySelectorAll('.mbtn[data-style]').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
+  map.setStyle(styles[s]||styles.dark);
+  map.once('style.load',()=>{map.addSource('events',{type:'geojson',data:geoJsonData});map.addLayer({id:'events-heat',type:'heatmap',source:'events',paint:{'heatmap-weight':['interpolate',['linear'],['get','magnitude'],0,0.2,10,1],'heatmap-intensity':0.6,'heatmap-radius':30,'heatmap-opacity':.4,'heatmap-color':['interpolate',['linear'],['heatmap-density'],0,'rgba(0,0,0,0)',.2,'#1d4ed8',.5,'#f59e0b',1,'#ef4444']}});map.addLayer({id:'events-circle',type:'circle',source:'events',paint:{'circle-radius':buildSizeExpr(),'circle-color':buildColorExpr(),'circle-opacity':.85,'circle-stroke-width':1,'circle-stroke-color':'rgba(255,255,255,.25)'}});});
+}
+function toggleHeat(btn){heatOn=!heatOn;if(map.getLayer('events-heat'))map.setLayoutProperty('events-heat','visibility',heatOn?'visible':'none');btn.classList.toggle('active',heatOn);}
+
+async function loadMapData(){
+  const layers=[...activeLayers].join(',');const zoom=map?Math.round(map.getZoom()):2;
+  let url=`/dashboard/map-data?hours=48&layers=${layers}&zoom=${zoom}`;
+  if(currentView==='war'&&currentTheater&&THEATERS[currentTheater].bbox){const[w,s,e,n]=THEATERS[currentTheater].bbox;url+=`&bbox=${w},${s},${e},${n}`;}
+  else if(zoom>=5&&map){const b=map.getBounds();url+=`&bbox=${b.getWest().toFixed(3)},${b.getSouth().toFixed(3)},${b.getEast().toFixed(3)},${b.getNorth().toFixed(3)}`;}
+  const data=await apiFetch(url);if(!data)return;
+  let feats=data.features||[];
+  if(searchQuery){const q=searchQuery.toLowerCase();feats=feats.filter(f=>(f.properties?.title||'').toLowerCase().includes(q)||(f.properties?.layer||'').toLowerCase().includes(q));}
+  geoJsonData={...data,features:feats};
+  if(map&&map.getSource('events'))map.getSource('events').setData(geoJsonData);
+  document.getElementById('feature-count').textContent=feats.length+' events';
+  updateRpContext();
+  const hasEmg=feats.some(f=>f.properties?.layer==='aircraft_emergency');
+  document.getElementById('emg-badge').style.display=hasEmg?'inline':'none';
+  if(currentView==='aviation')updateAvStats(feats);
 }
 
-// ── API Calls ──────────────────────────────────────────────────────────
+async function loadDashboardLive(){
+  const d=await apiFetch('/dashboard/live');if(!d)return;
+  const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  s('s-geo24',d.geo_events_24h||0);s('s-obs',d.observations_total||0);s('s-zones',(d.convergence_zones||[]).length);
+  s('s-inv',d.investigations||0);s('s-sources',Object.values(d.layers||{}).filter(v=>v>0).length);s('s-topics',d.discovered_topics||0);
+  document.getElementById('last-update').textContent=new Date().toLocaleTimeString();
+  document.getElementById('sse-subs').textContent=(d.sse_subscribers||0)+' sub';
+  const L=d.layers||{};
+  s('s-conflict',L.conflict||0);s('s-military',L.military||0);s('s-political',L.political||0);s('s-osint',(L.telegram||0)+(L.social_media||0));
+  renderLayerToggles(L,'layer-toggles',activeLayers);
+  renderEventFeed(d.recent_geo_events||[]);
+  renderConvergenceZones(d.convergence_zones||[]);
+  renderAlerts(d.recent_alerts||[]);
+}
 
-async function apiFetch(path, options = {}) {
-  try {
-    const resp = await fetch(`${API_BASE}${path}`, { headers: HEADERS, ...options });
-    if (!resp.ok) throw new Error(`${resp.status}`);
-    return await resp.json();
-  } catch (e) {
-    console.warn(`API ${path}:`, e.message);
-    return null;
+async function loadTimeline(){
+  const d=await apiFetch('/dashboard/timeline?hours=48&bucket_hours=2');if(!d?.buckets)return;
+  const mx=Math.max(...d.buckets.map(b=>b.total),1);
+  document.getElementById('timeline-bars').innerHTML=d.buckets.map(b=>`<div class="tlbar" style="height:${Math.max(2,(b.total/mx)*44)}px" title="${b.time}: ${b.total}"></div>`).join('');
+}
+
+async function loadDiscoveredTopics(){
+  const d=await apiFetch('/discovery/topics?status=new&limit=8');const el=document.getElementById('discovered-topics');
+  if(!d||d.length===0){el.innerHTML='<div class="empty">No new topics. Click Run to find emerging stories.</div>';return;}
+  el.innerHTML=d.map(t=>{const sc=t.score>=.7?'high':t.score>=.4?'medium':'low';return`<div class="tcard"><div style="display:flex;justify-content:space-between"><span class="tscore ${sc}">${(t.score*100).toFixed(0)}%</span><span style="font-size:10px;color:var(--text-secondary)">${t.source}</span></div><div class="ttitle">${esc(t.title)}</div><div class="tmeta">${esc(t.suggested_seed_query||'')}</div><div class="tactions"><button class="btnx" onclick="promoteTopic(${t.id})">&#9654; Promote</button><button class="btnx d" onclick="dismissTopic(${t.id})">&#10005;</button></div></div>`;}).join('');
+}
+
+function renderLayerToggles(counts,cid,layerSet){
+  const el=document.getElementById(cid);if(!el)return;
+  const groups={};for(const[l,cfg]of Object.entries(LAYERS)){if(!groups[cfg.group])groups[cfg.group]=[];groups[cfg.group].push({l,cfg,cnt:counts[l]||0});}
+  el.innerHTML=Object.entries(groups).map(([g,items])=>`<div class="lgrp"><div class="lgrp-t">${g}</div>${items.map(({l,cfg,cnt})=>`<label class="ltog"><input type="checkbox" ${layerSet.has(l)?'checked':''} onchange="toggleLayer('${l}',this.checked)"><span class="ldot" style="background:${cfg.color}"></span><span class="lname">${cfg.icon} ${cfg.label}</span>${cnt>0?`<span class="lcnt">${cnt}</span>`:''}</label>`).join('')}</div>`).join('');
+}
+function toggleLayer(l,en){if(en)activeLayers.add(l);else activeLayers.delete(l);loadMapData();}
+
+function setView(v){
+  if(currentView==='aviation'&&v!=='aviation')stopFlightTracking();
+  currentView=v;
+  document.querySelectorAll('.vbtn').forEach(b=>{b.className='vbtn';if(b.id==='vbtn-'+v)b.className='vbtn active '+(v==='world'?'':v);});
+  ['world','war','aviation','cameras','local','briefing'].forEach(n=>{const e=document.getElementById('lp-'+n);if(e)e.style.display=n===v?'block':'none';});
+  const rpContent=document.getElementById('rp-content');
+  const rpCtx=document.getElementById('rp-ctx');
+  const rpFilterBar=document.getElementById('rp-filter-bar');
+  const rpBrf=document.getElementById('rp-briefing');
+  if(v==='briefing'){
+    if(rpContent)rpContent.style.display='none';
+    if(rpCtx)rpCtx.style.display='none';
+    if(rpFilterBar)rpFilterBar.style.display='none';
+    if(rpBrf)rpBrf.style.display='flex';
+    loadBriefing(false);
+  } else {
+    if(rpContent)rpContent.style.display='';
+    if(rpCtx)rpCtx.style.display='';
+    if(rpFilterBar)rpFilterBar.style.display='';
+    if(rpBrf)rpBrf.style.display='none';
+    // Show camera section only on cameras view
+    const camSec=document.getElementById('rp-cams-section');
+    if(camSec)camSec.style.display=(v==='cameras')?'':'none';
+    setRpFilter('all');
+    updateRpContext();
   }
+  if(v==='world'){activeLayers=new Set(['earthquake','fire','weather_alert','conflict','military','news','political','humanitarian','disaster','health_alert','cyber']);map?.flyTo({center:[20,25],zoom:2.5});loadDashboardLive();loadTimeline();loadDiscoveredTopics();}
+  else if(v==='war'){activeLayers=new Set(['conflict','military','telegram','news','political','social_media','humanitarian']);renderWarPanel();if(!currentTheater)selectTheater('all_zones');}
+  else if(v==='aviation'){activeLayers=new Set(['aircraft','aircraft_military','aircraft_emergency']);map?.flyTo({center:[0,30],zoom:2});loadMapData();startFlightTracking();}
+  else if(v==='cameras'){setRpFilter('cams');loadCameraGrid();loadMapData();}
+  else if(v==='local'){activeLayers=new Set(['earthquake','fire','weather_alert','news','humanitarian','disaster','camera','local_news']);renderLocalPanel();if(userLocation)flyToLocal();else loadMapData();}
 }
 
-async function loadMapData() {
-  const layers = [...activeLayers].join(',');
-  const data = await apiFetch(`/dashboard/map-data?hours=48&layers=${layers}`);
-  if (data) {
-    geoJsonData = data;
-    if (map.getSource('events')) map.getSource('events').setData(data);
-  }
+function renderWarPanel(){
+  document.getElementById('theater-grid').innerHTML=Object.entries(THEATERS).map(([k,t])=>`<button class="th-btn ${currentTheater===k?'active':''}" onclick="selectTheater('${k}')"><div class="th-name">${t.name}</div><div class="th-st"><span class="tdot"></span>Active</div></button>`).join('');
+  renderLayerToggles({},'war-layers',activeLayers);
+}
+function selectTheater(k){
+  currentTheater=k;const t=THEATERS[k];activeLayers=new Set(t.layers);
+  document.querySelectorAll('.th-btn').forEach((b,i)=>b.classList.toggle('active',Object.keys(THEATERS)[i]===k));
+  map?.flyTo({center:t.center,zoom:t.zoom,duration:1500});
+  loadMapData();
+  apiFetch(`/dashboard/map-data?hours=72&layers=${t.layers.join(',')}&zoom=2`).then(d=>{if(d)renderEventFeed((d.features||[]).map(f=>f.properties).slice(0,40));});
+  if(k!=='all_zones')showZoneReport(k);
 }
 
-async function loadDashboardLive() {
-  const data = await apiFetch('/dashboard/live');
-  if (!data) return;
-
-  document.getElementById('stat-investigations').textContent = data.investigations || 0;
-  document.getElementById('stat-observations').textContent = data.observations_total || 0;
-  document.getElementById('stat-geo-events').textContent = data.geo_events_24h || 0;
-  document.getElementById('stat-convergence').textContent = (data.convergence_zones || []).length;
-  document.getElementById('subscriber-count').textContent = `${data.sse_subscribers || 0} subscribers`;
-  document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
-
-  // Layers
-  const layerDiv = document.getElementById('layer-toggles');
-  const layers = data.layers || {};
-  layerDiv.innerHTML = Object.entries(LAYER_COLORS).map(([layer, color]) => {
-    const count = layers[layer] || 0;
-    const checked = activeLayers.has(layer) ? 'checked' : '';
-    return `<label class="layer-toggle">
-      <input type="checkbox" ${checked} onchange="toggleLayer('${layer}', this.checked)">
-      <span class="layer-dot" style="background:${color}"></span>
-      ${layer.replace('_', ' ')}
-      <span class="layer-count">${count}</span>
-    </label>`;
-  }).join('');
-
-  // Convergence zones
-  renderConvergenceZones(data.convergence_zones || []);
-
-  // Alerts
-  renderAlerts(data.recent_alerts || []);
-
-  // Geo events feed
-  const geoEvents = data.recent_geo_events || [];
-  renderEventFeed(geoEvents);
+function refreshAviation(){
+  const cats=[];
+  if(document.getElementById('av-mil')?.checked)cats.push('aircraft_military');
+  if(document.getElementById('av-adv')?.checked)cats.push('aircraft_military');
+  if(document.getElementById('av-emg')?.checked)cats.push('aircraft_emergency');
+  if(document.getElementById('av-spc')?.checked)cats.push('aircraft_military');
+  if(document.getElementById('av-all')?.checked)cats.push('aircraft');
+  activeLayers=new Set(cats.length?cats:['aircraft_military','aircraft_emergency']);loadMapData();
 }
 
-async function loadTimeline() {
-  const data = await apiFetch('/dashboard/timeline?hours=48&bucket_hours=2');
-  if (!data || !data.buckets) return;
-  const bars = data.buckets;
-  const maxTotal = Math.max(...bars.map(b => b.total), 1);
-  const container = document.getElementById('timeline-bars');
-  container.innerHTML = bars.map(b => {
-    const h = Math.max(2, (b.total / maxTotal) * 55);
-    const tooltip = `${b.time}: ${b.total} events`;
-    return `<div class="bar" style="height:${h}px" title="${tooltip}"></div>`;
-  }).join('');
-}
-
-async function loadDiscoveredTopics() {
-  const data = await apiFetch('/discovery/topics?status=new&limit=10');
-  if (!data) return;
-  const container = document.getElementById('discovered-topics');
-  if (data.length === 0) {
-    container.innerHTML = '<p style="font-size:11px;color:var(--text-secondary)">No new topics. Run discovery to find emerging stories.</p>';
-    return;
-  }
-  container.innerHTML = data.map(t => {
-    const scoreClass = t.score >= 0.7 ? 'high' : t.score >= 0.4 ? 'medium' : 'low';
-    return `<div class="topic-card">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <span class="topic-score ${scoreClass}">${(t.score * 100).toFixed(0)}%</span>
-        <span style="font-size:10px;color:var(--text-secondary)">${t.source}</span>
-      </div>
-      <div class="topic-title">${escapeHtml(t.title)}</div>
-      <div class="topic-meta">${t.suggested_seed_query} | ${(t.suggested_connectors || []).join(', ')}</div>
-      <div class="topic-actions">
-        <button class="btn-sm" onclick="promoteTopic(${t.id})">Promote to Investigation</button>
-        <button class="btn-sm danger" onclick="dismissTopic(${t.id})">Dismiss</button>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-async function loadEntityCount() {
-  // Get a rough count from investigations
-  const inv = await apiFetch('/investigations?limit=1');
-  if (inv && inv.length > 0) {
-    const entities = await apiFetch(`/investigations/${inv[0].id}/entities?limit=1`);
-    if (entities) {
-      document.getElementById('stat-entities').textContent = (entities.entities || []).length || '--';
+async function loadLiveFlights(){
+  const data=await apiFetch('/dashboard/flights/live');
+  if(!data)return;
+  if(map){
+    if(map.getSource('flights')){
+      map.getSource('flights').setData(data);
+    } else {
+      map.addSource('flights',{type:'geojson',data:data});
+      // Circle dot for aircraft position (no external sprite needed)
+      map.addLayer({id:'flights-layer',type:'circle',source:'flights',paint:{'circle-radius':['case',['get','is_emergency'],9,6],'circle-color':['case',['get','is_emergency'],'#ef4444','#60a5fa'],'circle-stroke-width':2,'circle-stroke-color':['case',['get','is_emergency'],'#dc2626','#1d4ed8'],'circle-opacity':0.95}});
+      // Callsign text label
+      map.addLayer({id:'flights-label',type:'symbol',source:'flights',layout:{'text-field':['get','callsign'],'text-size':9,'text-offset':[0,1.4],'text-optional':true,'text-allow-overlap':false},paint:{'text-color':'#00ff88','text-halo-color':'#000','text-halo-width':1}});
+      map.on('click','flights-layer',(e)=>{
+        const props=e.features[0].properties;
+        new maplibregl.Popup({maxWidth:'300px'}).setLngLat(e.lngLat).setHTML(`<div style="color:#111;font-size:12px"><div style="font-weight:700;margin-bottom:4px">&#9992; ${esc(props.callsign)}</div><div>Type: ${esc(props.type)}</div><div>Alt: ${props.altitude_ft}ft | Speed: ${props.speed_kts}kts</div><div>Heading: ${props.heading}&deg;</div>${props.squawk?`<div>Squawk: <b>${props.squawk}</b></div>`:''}<br><a href="${props.adsb_url}" target="_blank" style="color:#3b82f6">Track on ADSBexchange &#8594;</a></div>`).addTo(map);
+      });
+      map.on('mouseenter','flights-layer',()=>map.getCanvas().style.cursor='pointer');
+      map.on('mouseleave','flights-layer',()=>map.getCanvas().style.cursor='');
     }
   }
+  const count=data.features?data.features.length:0;
+  const el=document.getElementById('s-av-mil');if(el)el.textContent=count;
+  const lu=document.getElementById('flight-last-update');if(lu)lu.textContent=new Date().toLocaleTimeString();
+  // Also update event feed list
+  const feed=document.getElementById('event-feed');
+  const feats=data.features||[];
+  if(!feats.length){if(feed)feed.innerHTML='<div class="empty">No live military flights returned.<br><small>adsb.lol may be temporarily unavailable.</small></div>';return;}
+  if(feed)feed.innerHTML=feats.slice(0,80).map(f=>{const p=f.properties||{};const isEmg=p.is_emergency;return`<div class="fl-item" onclick="flyToEvent(${f.geometry.coordinates[1]},${f.geometry.coordinates[0]})"><div class="fl-hdr"><span class="cs">${esc(p.callsign||'?')}</span><span class="fcat ${isEmg?'emergency':'military_us'}">${isEmg?'EMERGENCY':'MILITARY'}</span></div><div class="fdtl">${esc(p.type||'?')} &middot; ${p.altitude_ft?p.altitude_ft+'ft':'?'} &middot; ${p.speed_kts?p.speed_kts+'kts':''}</div></div>`;}).join('');
+  updateAvStats(feats);
 }
 
-async function loadStoryCount() {
-  const inv = await apiFetch('/investigations?limit=1');
-  if (inv && inv.length > 0) {
-    const stories = await apiFetch(`/investigations/${inv[0].id}/stories?limit=1`);
-    if (stories) {
-      document.getElementById('stat-stories').textContent = stories.length || '--';
+function startFlightTracking(){
+  loadLiveFlights();
+  if(flightRefreshInterval)clearInterval(flightRefreshInterval);
+  flightRefreshInterval=setInterval(loadLiveFlights,60000);
+}
+function stopFlightTracking(){
+  if(flightRefreshInterval){clearInterval(flightRefreshInterval);flightRefreshInterval=null;}
+  // Remove flight layer from map
+  if(map&&map.getLayer('flights-label'))map.removeLayer('flights-label');
+  if(map&&map.getLayer('flights-layer'))map.removeLayer('flights-layer');
+  if(map&&map.getSource('flights'))map.removeSource('flights');
+}
+
+function updateAvStats(feats){
+  const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  const mil=feats.filter(f=>(f.properties?.layer||'').includes('military')&&!f.properties?.is_emergency).length;
+  const emg=feats.filter(f=>f.properties?.is_emergency).length;
+  const spc=feats.filter(f=>f.properties?.category==='special').length;
+  s('s-av-mil',mil);s('s-av-emg',emg);s('s-av-spc',spc);s('s-av-tot',feats.length);
+}
+
+function _ytThumb(embedUrl){
+  if(!embedUrl)return null;
+  const m=embedUrl.match(/youtube(?:-nocookie)?\.com\/embed\/([a-zA-Z0-9_-]{11})/);
+  return m?`https://img.youtube.com/vi/${m[1]}/mqdefault.jpg`:null;
+}
+
+function _buildCamCard(p, showRegion=true){
+  const card=document.createElement('div');
+  card.className='ccard';
+  const thumb=p.thumbnail||_ytThumb(p.embed_url||p.url||'');
+  const regLabel=(p.region||'').replace(/_/g,' ');
+  const typeColor={traffic:'traffic',conflict_cam:'war',fire_cam:'fire',volcano_cam:'fire',port_cam:'port',weather_cam:'port'}[p.camera_type||p.type]||'';
+  const badgeHtml=typeColor?`<span class="tbadge ${typeColor}">${typeColor.toUpperCase()}</span>`:'';
+  const thumbSection=thumb
+    ?`<div class="cthumb"><img src="${thumb}" loading="lazy" onerror="this.style.opacity='.2'"><div class="cplay"><div class="cplay-btn">&#9654;</div></div><span class="livebadge">LIVE</span>${badgeHtml}</div>`
+    :`<div class="cthumb"><div class="cthumb-placeholder"><span>&#128249;</span><span style="font-size:9px;color:#475569">LIVE FEED</span></div><div class="cplay"><div class="cplay-btn">&#9654;</div></div><span class="livebadge">LIVE</span>${badgeHtml}</div>`;
+  const title=(p.title||p.name||'').replace('Camera: ','');
+  const src=p.source?`<span style="color:#22c55e;font-size:8px">&#9679;</span> ${esc(p.source)}`:'';
+  card.innerHTML=`${thumbSection}<div class="cinfo"><div class="cname">${esc(title)}</div><div class="creg">${showRegion?esc(regLabel)+' &middot; ':''} ${src}</div></div>`;
+  card.onclick=()=>openCameraViewer({title,embed_url:p.embed_url||p.url||'',thumbnail:thumb,source:p.source||'Live Feed'});
+  return card;
+}
+
+async function loadCameraGrid(filter=null){
+  if(!_camerasData){
+    const grid=document.getElementById('camera-feeds');
+    if(grid)grid.innerHTML='<div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:11px"><div class="spinner" style="margin:0 auto 10px"></div>Loading cameras…</div>';
+    _camerasData=await apiFetch('/dashboard/cameras');
+  }
+  if(!_camerasData)return;
+  // Render region tabs with counts (both in left panel + right panel inline)
+  const allFeats=_camerasData.features||[];
+  const regCounts={};
+  allFeats.forEach(f=>{const r=f.properties.region||'other';regCounts[r]=(regCounts[r]||0)+1;});
+  const regions=Object.keys(regCounts);
+  const tabHtml=regions.map(r=>`<span class="crtab ${r===currentCamReg?'active':''}" data-reg="${r}" onclick="setCamReg('${r}')">${r.replace(/_/g,' ')} <span style="opacity:.6;font-size:9px">${regCounts[r]}</span></span>`).join('');
+  const tabs=document.getElementById('cam-region-tabs');
+  if(tabs)tabs.innerHTML=tabHtml;
+  const rpTabs=document.getElementById('rp-cam-tabs');
+  if(rpTabs)rpTabs.innerHTML=tabHtml;
+  const tot=document.getElementById('s-cam-tot');if(tot)tot.textContent=allFeats.length;
+  const war=document.getElementById('s-cam-war');if(war)war.textContent=(regCounts['conflict_zones']||0)+(regCounts['ukraine']||0);
+  // Render camera grid in right panel
+  const grid=document.getElementById('camera-feeds');
+  if(!grid)return;
+  let cameras=(_camerasData.features||[]);
+  const reg=filter||currentCamReg;
+  if(reg)cameras=cameras.filter(f=>f.properties.region===reg);
+  grid.innerHTML='';
+  grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px';
+  if(!cameras.length){grid.innerHTML='<div class="empty">No cameras for this region.</div>';return;}
+  cameras.forEach(f=>grid.appendChild(_buildCamCard(f.properties,false)));
+}
+
+function setCamReg(r){
+  currentCamReg=r;
+  document.querySelectorAll('.crtab').forEach(t=>t.classList.toggle('active',t.dataset.reg===r));
+  loadCameraGrid(r);
+}
+
+function openCameraViewer(props){
+  let overlay=document.getElementById('camera-viewer-overlay');
+  if(!overlay){
+    overlay=document.createElement('div');
+    overlay.id='camera-viewer-overlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:1000;display:flex;align-items:center;justify-content:center';
+    overlay.onclick=(e)=>{if(e.target===overlay)overlay.style.display='none';};
+    document.body.appendChild(overlay);
+  }
+  const title=esc((props.title||'').replace('Camera: ',''));
+  const embedUrl=props.embed_url||props.url||'';
+  const thumb=props.thumbnail||_ytThumb(embedUrl);
+  const thumbBg=thumb?`background:url('${thumb}') center/cover`:'background:#050810';
+  overlay.innerHTML=`
+    <div style="background:#0d1117;border:1px solid #2d3f58;border-radius:12px;width:92%;max-width:960px;overflow:hidden">
+      <div style="padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #21293a">
+        <span style="font-weight:700;font-size:14px">&#128249; ${title}</span>
+        <div style="display:flex;gap:10px;align-items:center">
+          <a href="${embedUrl}" target="_blank" style="color:#3b82f6;font-size:11px;text-decoration:none">&#8599; Open full screen</a>
+          <button onclick="document.getElementById('camera-viewer-overlay').style.display='none'" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;line-height:1">&#10005;</button>
+        </div>
+      </div>
+      <div style="position:relative;aspect-ratio:16/9;${thumbBg}">
+        <div id="cam-spinner" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,8,16,.7);flex-direction:column;gap:10px">
+          <div class="spinner"></div><span style="font-size:11px;color:#94a3b8">Loading stream…</span>
+        </div>
+        <iframe src="${embedUrl}" style="position:absolute;inset:0;width:100%;height:100%;border:none;opacity:0;transition:opacity .3s"
+          allowfullscreen allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+          onload="this.style.opacity='1';const s=document.getElementById('cam-spinner');if(s)s.style.display='none'">
+        </iframe>
+      </div>
+      <div style="padding:8px 16px;font-size:11px;color:#64748b;display:flex;justify-content:space-between;align-items:center">
+        <span>Source: ${esc(props.source||'Live Feed')}</span>
+        <span style="font-size:10px;color:#475569">Press ESC or click outside to close</span>
+      </div>
+    </div>`;
+  overlay.style.display='flex';
+  // ESC key closes
+  overlay._escHandler=(e)=>{if(e.key==='Escape'){overlay.style.display='none';document.removeEventListener('keydown',overlay._escHandler);}};
+  document.addEventListener('keydown',overlay._escHandler);
+}
+
+function openCam(url,lat,lon){openCameraViewer({title:'Camera',embed_url:url,source:'external'});if(map)map.flyTo({center:[lon,lat],zoom:8,duration:1000});}
+
+async function renderLocalPanel(){
+  const el=document.getElementById('local-loc-card');
+  if(!el)return;
+  el.innerHTML=userLocation?
+    `<div class="lcard"><div class="lname-d">&#128205; ${esc(userLocation.name)}</div><div class="lcoords">${userLocation.lat.toFixed(4)}, ${userLocation.lon.toFixed(4)}</div></div>`
+    :'<div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">No location set. Enter city, ZIP, or use GPS below.</div>';
+  renderLayerToggles({},'local-layers',activeLayers);
+  if(userLocation) await loadLocalIntelligence();
+}
+
+async function loadLocalIntelligence(){
+  if(!userLocation) return;
+  const city=userLocation.name.split(',')[0].trim();
+  const state=(userLocation.name.split(',')[1]||'').trim();
+  const params=new URLSearchParams({lat:userLocation.lat,lon:userLocation.lon,radius_km:localScope==='state'?500:localRadius,city,state,scope:localScope});
+  const data=await apiFetch('/dashboard/local-intelligence?'+params.toString());
+  if(!data) return;
+
+  // Update map with local events
+  const feats=data.features||[];
+  geoJsonData={type:'FeatureCollection',features:feats};
+  if(map&&map.getSource('events'))map.getSource('events').setData(geoJsonData);
+  document.getElementById('feature-count').textContent=feats.length+' events';
+  updateRpContext();
+
+  // Show local cameras in right-panel CAMERAS tab (same card style as main CAMERAS tab)
+  const cameras=(data.cameras||[]).filter(c=>c.embed_url);
+  const grid=document.getElementById('camera-feeds');
+  if(grid&&cameras.length>0){
+    grid.innerHTML='';
+    grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px';
+    const hdr=document.createElement('div');
+    hdr.style.cssText='grid-column:1/-1;font-size:11px;font-weight:700;color:var(--text-secondary);letter-spacing:1px;padding:2px 0 4px;border-bottom:1px solid var(--border)';
+    hdr.textContent=`LOCAL CAMERAS — ${userLocation?userLocation.name.split(',')[0].toUpperCase():''} (${cameras.length})`;
+    grid.appendChild(hdr);
+    cameras.slice(0,10).forEach(c=>{
+      const thumb=c.thumbnail||_ytThumb(c.embed_url||'');
+      const card=_buildCamCard({title:c.title,embed_url:c.embed_url,thumbnail:thumb,source:c.source||'Live Feed',camera_type:'traffic'},false);
+      grid.appendChild(card);
+    });
+  }
+
+  // Show freshly ingested count
+  const freshEl=document.getElementById('local-fresh-badge');
+  if(freshEl) freshEl.textContent=data.freshly_ingested>0?data.freshly_ingested+' new stories fetched':'';
+
+  // Populate event feed with local events
+  renderEventFeed(feats.map(f=>({...f.properties,latitude:f.geometry.coordinates[1],longitude:f.geometry.coordinates[0]})));
+
+  console.log('Local intel:',feats.length,'events,',cameras.length,'cameras,',data.freshly_ingested,'freshly ingested');
+}
+
+async function setLocalLoc(){
+  const input=document.getElementById('local-city');
+  if(!input) return;
+  const val=input.value.trim();if(!val)return;
+  try{
+    const r=await fetch('https://nominatim.openstreetmap.org/search?q='+encodeURIComponent(val)+'&format=json&limit=1',{headers:{'User-Agent':'STS-Intel/1.0'}});
+    const d=await r.json();
+    if(d.length>0){
+      userLocation={lat:parseFloat(d[0].lat),lon:parseFloat(d[0].lon),name:d[0].display_name.split(',').slice(0,3).join(',')};
+      localStorage.setItem('userLocation',JSON.stringify(userLocation));
+      await renderLocalPanel();
+      flyToLocal();
+    } else {
+      alert('Location not found. Try "Boston, MA" or a full city name.');
     }
+  }catch(e){console.error('Geocode error',e);}
+}
+function detectGPS(){if(!navigator.geolocation)return;navigator.geolocation.getCurrentPosition(async p=>{userLocation={lat:p.coords.latitude,lon:p.coords.longitude,name:'GPS Location'};localStorage.setItem('userLocation',JSON.stringify(userLocation));await renderLocalPanel();flyToLocal();});}
+function clearLoc(){userLocation=null;localStorage.removeItem('userLocation');const freshEl=document.getElementById('local-fresh-badge');if(freshEl)freshEl.textContent='';renderLocalPanel();map?.flyTo({center:[20,25],zoom:2.5});loadMapData();}
+function setRadius(km,btn){localRadius=km;document.querySelectorAll('#radius-btns button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');if(userLocation){flyToLocal();loadLocalIntelligence();}}
+function flyToLocal(){if(!userLocation||!map)return;const z={25:11,100:9,250:8,500:7};map.flyTo({center:[userLocation.lon,userLocation.lat],zoom:z[localRadius]||7,duration:1500});}
+
+async function loadBriefing(force=false){
+  const loading=document.getElementById('brf-loading');const txt=document.getElementById('brf-text');const ts=document.getElementById('brf-ts');
+  if(loading)loading.style.display='flex';if(txt)txt.style.display='none';
+  const d=await apiFetch('/dashboard/briefing'+(force?'?force=true':''));
+  if(!d){if(loading)loading.innerHTML='<span style="color:var(--accent-red)">&#9888; Briefing unavailable. LLM endpoint may not be deployed yet.</span>';return;}
+  if(loading)loading.style.display='none';
+  if(txt){txt.style.display='block';txt.innerHTML=md(d.briefing||'No briefing generated.');}
+  if(ts)ts.textContent='Generated: '+(d.generated_at?new Date(d.generated_at).toLocaleString():'--')+' '+(d.cached?'(cached)':'(fresh)');
+  const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};s('s-brf-evts',d.event_count||'--');s('s-brf-cache',d.cached?'Cached':'Fresh');
+}
+function md(t){return t.replace(/^### (.+)$/gm,'<h3>$1</h3>').replace(/^## (.+)$/gm,'<h2>$1</h2>').replace(/^# (.+)$/gm,'<h1>$1</h1>').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>').replace(/^- (.+)$/gm,'<li>$1</li>').replace(/\n\n/g,'</p><p>').replace(/^(?!<[hlu])(.+)$/gm,'<p>$1</p>').replace(/<p><\/p>/g,'');}
+
+function renderEventFeed(evts){
+  const el=document.getElementById('event-feed');
+  if(!el)return;
+  if(!evts||!evts.length){el.innerHTML='<div class="empty">No events for this filter / area.</div>';return;}
+  const SOCIAL=['social_intel','telegram','reddit','social_media'];
+  el.innerHTML=evts.slice(0,80).map(e=>{
+    const col=lc(e.layer);
+    const isSocial=SOCIAL.includes(e.layer);
+    const isAlert=['earthquake','fire','weather_alert','disaster','health_alert'].includes(e.layer);
+    const icon=isSocial?'📡':isAlert?'⚡':'📰';
+    const locStr=e.location_name||(e.latitude&&e.longitude?`${Number(e.latitude).toFixed(2)}°, ${Number(e.longitude).toFixed(2)}°`:'');
+    const topicBadge=e.topic?`<span style="background:rgba(139,92,246,.15);color:#a78bfa;font-size:8px;padding:1px 5px;border-radius:3px;margin-left:4px">${esc(e.topic)}</span>`:'';
+    const srcBadge=e.source?`<span style="font-size:9px;color:var(--text-dim)">${esc(e.source)}</span>`:'';
+    return`<div class="evi" onclick="flyToEvent(${e.latitude||0},${e.longitude||0})">
+      <div class="evh">
+        <span class="evlayer" style="background:${col}18;color:${col};border:1px solid ${col}30">${icon} ${(e.layer||'').replace(/_/g,' ')}</span>
+        <span class="evtime">${ago(e.event_time)}</span>
+      </div>
+      <div class="evtitle">${esc((e.title||'').substring(0,180))}${topicBadge}</div>
+      <div class="evdetail">
+        ${locStr?`<span>📍 ${esc(locStr)}</span>`:''}
+        ${e.magnitude?`<span style="color:${isAlert?'#f59e0b':'#94a3b8'}">${e.layer==='earthquake'?'M':'⚡'}${Number(e.magnitude).toFixed(1)}</span>`:''}
+        ${srcBadge}
+      </div>
+    </div>`;
+  }).join('');
+}
+function renderConvergenceZones(zones){
+  const el=document.getElementById('convergence-zones');if(!zones.length){el.innerHTML='<div class="empty">No active zones. Click Convergence on map to detect.</div>';return;}
+  el.innerHTML=zones.map(z=>`<div class="zcard" onclick="flyToEvent(${z.center_lat},${z.center_lon})"><div style="display:flex;justify-content:space-between;align-items:center"><span class="zsev ${z.severity}">${(z.severity||'').toUpperCase()}</span><span style="font-size:10px;color:var(--text-secondary)">${z.signal_count} signals</span></div><div style="margin-top:4px">${(z.signal_types||[]).map(t=>`<span class="ztag">${t}</span>`).join('')}</div><div style="font-size:10px;color:var(--text-secondary);margin-top:4px">${(z.center_lat||0).toFixed(2)}, ${(z.center_lon||0).toFixed(2)}</div></div>`).join('');
+}
+function renderAlerts(alerts){document.getElementById('alert-feed').innerHTML=(alerts||[]).map(a=>`<div class="evi"><div class="evh"><span class="evlayer" style="background:rgba(239,68,68,.2);color:#ef4444">${a.severity||'alert'}</span><span class="evtime">${ago(a.triggered_at)}</span></div><div class="evtitle">${esc(a.message||'')}</div></div>`).join('')||'<div class="empty">No recent alerts.</div>';}
+function renderConnectorStatus(){
+  const connectors=[['USGS Earthquakes','usgs','ok'],['NWS Weather','nws','ok'],['NASA FIRMS Fires','nasa_firms','ok'],['GDELT News','gdelt','ok'],['ACLED Conflict','acled','ok'],['FEMA Disaster','fema','ok'],['ReliefWeb','reliefweb','ok'],['OpenSky / ADS-B','opensky','ok'],['Reddit OSINT','reddit','ok'],['RSS Feeds 30+','rss','ok'],['WHO Health','who_alerts','ok'],['CISA Cyber','cisa_kev','ok'],['Telegram OSINT','telegram_osint','ok'],['Geo News','geo_news','ok'],['Local News (8 cities)','local_discovery','ok'],['LLM Intel (Ollama)','twitter_osint','ok']];
+  document.getElementById('connector-list').innerHTML=connectors.map(([n,t,s])=>`<div class="crow"><span><span class="cdot ${s}"></span>${n}</span><span style="font-size:9px;color:var(--text-secondary)">${t}</span></div>`).join('');
+}
+
+function filterEvents(q){searchQuery=q;loadMapData();}
+function flyToEvent(lat,lon){if(map)map.flyTo({center:[lon,lat],zoom:8,duration:1200});}
+function setRpFilter(f){
+  currentRpFilter=f;
+  document.querySelectorAll('.rpill').forEach(p=>p.classList.toggle('active',p.dataset.f===f));
+  const camSec=document.getElementById('rp-cams-section');
+  const zoneSec=document.getElementById('rp-zones-section');
+  const feedSec=document.getElementById('rp-feed-section');
+  const alertSec=document.getElementById('rp-alerts-section');
+  const showCams=f==='all'||f==='cams';
+  const showZones=f==='all'||f==='zones';
+  const showFeed=f==='all'||f==='news'||f==='social'||f==='alerts';
+  const showAlerts=f==='all'||f==='alerts';
+  // Camera section visibility: only on camera view or when filter=cams
+  if(camSec)camSec.style.display=(showCams&&(currentView==='cameras'||f==='cams'))?'':'none';
+  if(zoneSec)zoneSec.style.display=showZones?'':'none';
+  if(feedSec)feedSec.style.display=showFeed?'':'none';
+  if(alertSec)alertSec.style.display=showAlerts?'':'none';
+  // Re-render feed with type filter
+  if(geoJsonData){
+    const SOCIAL=['social_intel','telegram','reddit'];
+    const NEWS=['news','local_news','humanitarian','conspiracy','political','geo_news'];
+    const ALERT_L=['earthquake','fire','weather_alert','disaster','health_alert','cyber','maritime'];
+    let feats=geoJsonData.features||[];
+    if(f==='social')feats=feats.filter(ff=>SOCIAL.includes(ff.properties?.layer));
+    else if(f==='news')feats=feats.filter(ff=>NEWS.includes(ff.properties?.layer));
+    else if(f==='alerts')feats=feats.filter(ff=>ALERT_L.includes(ff.properties?.layer));
+    renderEventFeed(feats.map(ff=>({...ff.properties,latitude:ff.geometry?.coordinates[1],longitude:ff.geometry?.coordinates[0]})));
+  }
+  if(showCams&&currentView==='cameras')loadCameraGrid(currentCamReg);
+}
+function switchRpTab(n){const m={feed:'all',zones:'zones',cams:'cams',alerts:'alerts'};setRpFilter(m[n]||'all');}
+function updateRpContext(){
+  const label=document.getElementById('rp-ctx-label');
+  const count=document.getElementById('rp-ctx-count');
+  const bboxEl=document.getElementById('rp-ctx-bbox');
+  let areaName='🌍 WORLD OVERVIEW';
+  if(currentView==='local'&&userLocation)areaName=`📍 ${userLocation.name}${localScope==='state'?' (State)':''}`;
+  else if(currentView==='war'&&currentTheater)areaName=`🎯 ${currentTheater.toUpperCase()}`;
+  else if(currentView==='aviation')areaName='✈ AVIATION TRACKING';
+  else if(currentView==='cameras')areaName='📹 CAMERA FEEDS';
+  else if(currentView==='briefing')areaName='📋 INTEL BRIEFING';
+  else if(map){const z=map.getZoom();if(z>7){const c=map.getCenter();areaName=`🔍 ${c.lat.toFixed(2)}°N, ${c.lng.toFixed(2)}°E`;}}
+  if(label)label.textContent=areaName;
+  const total=geoJsonData?(geoJsonData.features||[]).length:0;
+  if(count)count.textContent=total+' events in view';
+  if(bboxEl&&map){const b=map.getBounds();bboxEl.textContent=`${b.getSouth().toFixed(1)}–${b.getNorth().toFixed(1)}°N  ${b.getWest().toFixed(1)}–${b.getEast().toFixed(1)}°E`;}
+}
+async function detectConvergence(){const d=await apiFetch('/geo/convergence?hours=48&radius_km=100&min_signal_types=2');if(d?.zones){renderConvergenceZones(d.zones);setRpFilter('zones');}}
+async function runDiscovery(){await apiFetch('/discovery/run',{method:'POST'});loadDiscoveredTopics();}
+async function promoteTopic(id){await apiFetch(`/discovery/topics/${id}/promote`,{method:'POST',body:JSON.stringify({priority:60})});loadDiscoveredTopics();}
+async function dismissTopic(id){await apiFetch(`/discovery/topics/${id}/dismiss`,{method:'POST'});loadDiscoveredTopics();}
+
+function setLocalScope(s){
+  localScope=s;
+  document.getElementById('scope-city')?.style && (document.getElementById('scope-city').style.borderColor=s==='city'?'var(--accent-blue)':'var(--border)');
+  document.getElementById('scope-city')?.style && (document.getElementById('scope-city').style.color=s==='city'?'var(--accent-blue)':'var(--text-secondary)');
+  document.getElementById('scope-state')?.style && (document.getElementById('scope-state').style.borderColor=s==='state'?'var(--accent-blue)':'var(--border)');
+  document.getElementById('scope-state')?.style && (document.getElementById('scope-state').style.color=s==='state'?'var(--accent-blue)':'var(--text-secondary)');
+  const desc=document.getElementById('scope-desc');
+  if(desc)desc.textContent=s==='state'?'All events across the entire state':'Events near the selected city only';
+  updateRpContext();
+  if(userLocation)loadLocalIntelligence();
+}
+function refreshAll(){
+  const btn=document.querySelector('.mbtn[onclick="refreshAll()"]');
+  if(btn){btn.disabled=true;btn.textContent='&#8635; Loading...';}
+  const tasks=[loadDashboardLive(),loadTimeline()];
+  if(currentView==='aviation'){tasks.push(loadLiveFlights());}
+  else if(currentView==='local'&&userLocation){tasks.push(loadLocalIntelligence());}
+  else if(currentView==='briefing'){tasks.push(loadBriefing(false));}
+  else{tasks.push(loadMapData());}
+  Promise.all(tasks)
+    .then(()=>{if(btn){btn.textContent='&#10003; Updated';setTimeout(()=>{btn.disabled=false;btn.textContent='&#8635; Refresh';},2000);}})
+    .catch(()=>{if(btn){btn.textContent='&#10005; Error';setTimeout(()=>{btn.disabled=false;btn.textContent='&#8635; Refresh';},2000);}});
+}
+
+function markdownToHtml(t){return t.replace(/^### (.+)$/gm,'<h3>$1</h3>').replace(/^## (.+)$/gm,'<h2>$1</h2>').replace(/^# (.+)$/gm,'<h1>$1</h1>').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>').replace(/^- (.+)$/gm,'<li>$1</li>').replace(/\n\n/g,'</p><p>').replace(/^(?!<[hlu])(.+)$/gm,'<p>$1</p>').replace(/<p><\/p>/g,'');}
+
+async function showZoneReport(zoneName){
+  let panel=document.getElementById('zone-report-panel');
+  if(!panel){
+    panel=document.createElement('div');
+    panel.id='zone-report-panel';
+    panel.style.cssText='position:absolute;top:60px;right:10px;width:380px;max-height:70vh;background:#0d1117;border:1px solid #2d3f58;border-radius:8px;overflow-y:auto;z-index:100;padding:16px';
+    const mapEl=document.querySelector('.map-c');if(mapEl)mapEl.appendChild(panel);
+  }
+  panel.innerHTML='<div style="color:#64748b;text-align:center;padding:20px">&#8635; Generating SITREP...</div>';
+  panel.style.display='block';
+  const data=await apiFetch(`/dashboard/zone-report/${zoneName}`);
+  if(data&&data.report){
+    panel.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:12px"><span style="font-weight:700;font-size:13px">&#128203; ${esc(zoneName.toUpperCase())} SITREP</span><button onclick="document.getElementById('zone-report-panel').style.display='none'" style="background:none;border:none;color:#64748b;cursor:pointer">&#10005;</button></div><div style="font-size:11px;color:#64748b;margin-bottom:12px">Generated: ${new Date(data.generated_at).toLocaleString()} &middot; ${data.events_used} signals</div><div style="font-size:12px;line-height:1.6;color:#e2e8f0">${markdownToHtml(data.report)}</div>`;
+  } else {
+    panel.innerHTML=`<div style="color:#ef4444;padding:10px">Failed to generate report. Check Ollama status.</div><button onclick="document.getElementById('zone-report-panel').style.display='none'" style="margin-top:8px;background:#161b27;border:1px solid #21293a;color:#e2e8f0;border-radius:4px;padding:4px 10px;cursor:pointer">Close</button>`;
   }
 }
 
-// ── Rendering ──────────────────────────────────────────────────────────
-
-function renderEventFeed(events) {
-  const container = document.getElementById('event-feed');
-  container.innerHTML = events.map(e => {
-    const layerClass = (e.layer || '').replace('_', '_');
-    const time = e.event_time ? new Date(e.event_time).toLocaleString() : '';
-    return `<div class="event-item" onclick="flyToEvent(${e.latitude}, ${e.longitude})">
-      <div class="event-header">
-        <span class="event-layer ${layerClass}">${e.layer || 'unknown'}</span>
-        <span class="event-time">${time}</span>
-      </div>
-      <div class="event-title">${escapeHtml((e.title || '').substring(0, 150))}</div>
-      <div class="event-coords">${e.latitude?.toFixed(3)}, ${e.longitude?.toFixed(3)}${e.magnitude ? ' | M' + e.magnitude : ''}</div>
-    </div>`;
-  }).join('') || '<p style="padding:12px;font-size:12px;color:var(--text-secondary)">No recent geo events. Ingest data to see events here.</p>';
+function connectSSE(){
+  const es=new EventSource(`${API_BASE}/events/stream?key=${API_KEY}`);
+  es.onopen=()=>{document.getElementById('sse-status').innerHTML='<span class="sdot live"></span> Live';};
+  es.onerror=()=>{document.getElementById('sse-status').innerHTML='<span class="sdot err"></span> Reconnecting...';};
+  es.addEventListener('ingestion',()=>{loadDashboardLive();loadMapData();});
+  es.addEventListener('geo_event',()=>{loadMapData();});
+  es.addEventListener('convergence',()=>{loadDashboardLive();});
+  es.addEventListener('discovery',()=>{loadDiscoveredTopics();});
 }
 
-function renderConvergenceZones(zones) {
-  const container = document.getElementById('convergence-zones');
-  container.innerHTML = zones.map(z => {
-    const types = z.signal_types || [];
-    return `<div class="zone-card" onclick="flyToEvent(${z.center_lat}, ${z.center_lon})">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <span class="zone-severity ${z.severity}">${z.severity}</span>
-        <span style="font-size:10px;color:var(--text-secondary)">${z.signal_count} signals</span>
-      </div>
-      <div class="zone-signals">${types.map(t => `<span class="zone-tag">${t}</span>`).join('')}</div>
-      <div style="font-size:10px;color:var(--text-secondary);margin-top:4px">${z.center_lat?.toFixed(2)}, ${z.center_lon?.toFixed(2)}</div>
-    </div>`;
-  }).join('') || '<p style="font-size:12px;color:var(--text-secondary)">No active convergence zones.</p>';
-}
-
-function renderAlerts(alerts) {
-  const container = document.getElementById('alert-feed');
-  container.innerHTML = alerts.map(a => `
-    <div class="event-item">
-      <div class="event-header">
-        <span class="event-layer ${a.severity === 'critical' ? 'earthquake' : 'disaster'}">${a.severity}</span>
-        <span class="event-time">${new Date(a.triggered_at).toLocaleString()}</span>
-      </div>
-      <div class="event-title">${escapeHtml(a.message)}</div>
-    </div>
-  `).join('') || '<p style="font-size:12px;color:var(--text-secondary)">No recent alerts.</p>';
-}
-
-function renderCameraFeeds() {
-  // Public webcam sources for monitoring zones
-  const cameras = [
-    { name: 'Kyiv, Ukraine', url: 'https://images.webcams.travel/preview/1170701794.jpg', live: true, lat: 50.45, lon: 30.52 },
-    { name: 'Odesa, Ukraine', url: 'https://images.webcams.travel/preview/1586498388.jpg', live: true, lat: 46.48, lon: 30.73 },
-    { name: 'Istanbul, Turkey', url: 'https://images.webcams.travel/preview/1365771389.jpg', live: true, lat: 41.01, lon: 28.98 },
-    { name: 'Tokyo, Japan', url: 'https://images.webcams.travel/preview/1586532141.jpg', live: true, lat: 35.68, lon: 139.69 },
-    { name: 'New York, USA', url: 'https://images.webcams.travel/preview/1586502498.jpg', live: true, lat: 40.71, lon: -74.01 },
-    { name: 'London, UK', url: 'https://images.webcams.travel/preview/1586498208.jpg', live: true, lat: 51.51, lon: -0.13 },
-  ];
-  const container = document.getElementById('camera-feeds');
-  container.innerHTML = cameras.map(c => `
-    <div class="camera-thumb" onclick="flyToEvent(${c.lat}, ${c.lon})" title="${c.name}">
-      <img src="${c.url}" alt="${c.name}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22320%22 height=%22180%22><rect fill=%22%231a2332%22 width=%22320%22 height=%22180%22/><text x=%2250%25%22 y=%2250%25%22 fill=%22%239ca3af%22 text-anchor=%22middle%22 dy=%22.3em%22 font-size=%2214%22>No Feed</text></svg>'">
-      ${c.live ? '<span class="live-badge">LIVE</span>' : ''}
-      <div class="camera-label">${c.name}</div>
-    </div>
-  `).join('');
-}
-
-function renderConnectorStatus() {
-  const connectors = [
-    { name: 'GDELT', status: 'active', type: 'gdelt' },
-    { name: 'USGS Earthquake', status: 'active', type: 'usgs' },
-    { name: 'NASA FIRMS', status: 'active', type: 'nasa_firms' },
-    { name: 'ACLED Conflict', status: 'active', type: 'acled' },
-    { name: 'NWS Weather', status: 'active', type: 'nws' },
-    { name: 'FEMA Disaster', status: 'active', type: 'fema' },
-    { name: 'ReliefWeb', status: 'active', type: 'reliefweb' },
-    { name: 'OpenSky', status: 'active', type: 'opensky' },
-    { name: 'RSS Feeds', status: 'active', type: 'rss' },
-    { name: 'Reddit', status: 'active', type: 'reddit' },
-  ];
-  document.getElementById('connector-status').innerHTML = connectors.map(c => `
-    <div class="connector-row">
-      <span><span class="connector-status ${c.status}"></span> ${c.name}</span>
-      <span style="font-size:10px;color:var(--text-secondary)">${c.type}</span>
-    </div>
-  `).join('');
-}
-
-// ── Actions ────────────────────────────────────────────────────────────
-
-function toggleLayer(layer, enabled) {
-  if (enabled) activeLayers.add(layer); else activeLayers.delete(layer);
-  loadMapData();
-}
-
-function flyToEvent(lat, lon) {
-  if (map) map.flyTo({ center: [lon, lat], zoom: 8, duration: 1500 });
-}
-
-async function runDiscovery() {
-  await apiFetch('/discovery/run', { method: 'POST' });
-  loadDiscoveredTopics();
-}
-
-async function promoteTopic(id) {
-  await apiFetch(`/discovery/topics/${id}/promote`, { method: 'POST', body: JSON.stringify({ priority: 60 }) });
-  loadDiscoveredTopics();
-  loadDashboardLive();
-}
-
-async function dismissTopic(id) {
-  await apiFetch(`/discovery/topics/${id}/dismiss`, { method: 'POST' });
-  loadDiscoveredTopics();
-}
-
-async function detectConvergence() {
-  const data = await apiFetch('/geo/convergence?hours=48&radius_km=100&min_signal_types=2', { method: 'GET' });
-  if (data && data.zones) {
-    renderConvergenceZones(data.zones);
-    switchTab('zones');
-  }
-}
-
-function refreshAllLayers() {
-  loadMapData();
-  loadDashboardLive();
-  loadTimeline();
-}
-
-function switchTab(name) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  event.target.classList.add('active');
-  document.getElementById(`tab-${name}`).classList.add('active');
-}
-
-function escapeHtml(text) {
-  const d = document.createElement('div');
-  d.textContent = text || '';
-  return d.innerHTML;
-}
-
-// ── SSE (Server-Sent Events) ───────────────────────────────────────────
-
-function connectSSE() {
-  const evtSource = new EventSource(`${API_BASE}/events/stream?key=${API_KEY}`);
-  evtSource.onopen = () => {
-    document.getElementById('sse-status').innerHTML = '<span class="status-dot"></span> Live';
-  };
-  evtSource.onerror = () => {
-    document.getElementById('sse-status').innerHTML = '<span class="status-dot" style="background:var(--accent-red)"></span> Reconnecting...';
-  };
-  evtSource.addEventListener('ingestion', (e) => {
-    loadDashboardLive();
-    loadMapData();
-  });
-  evtSource.addEventListener('convergence', (e) => {
-    loadDashboardLive();
-  });
-  evtSource.addEventListener('discovery', (e) => {
-    loadDiscoveredTopics();
-  });
-  evtSource.addEventListener('geo_event', (e) => {
-    loadMapData();
-  });
-}
-
-// ── Init ───────────────────────────────────────────────────────────────
-
-document.addEventListener('DOMContentLoaded', () => {
-  initMap();
-  loadDashboardLive();
-  loadTimeline();
-  loadDiscoveredTopics();
-  renderCameraFeeds();
-  renderConnectorStatus();
-  loadEntityCount();
-  loadStoryCount();
-
-  // Try SSE
-  try { connectSSE(); } catch(e) { console.warn('SSE unavailable:', e); }
-
-  // Auto-refresh every 60s
-  setInterval(() => {
-    loadDashboardLive();
-    loadMapData();
-    loadTimeline();
-  }, 60000);
+document.addEventListener('DOMContentLoaded',()=>{
+  initMap();loadDashboardLive();loadTimeline();loadDiscoveredTopics();renderConnectorStatus();
+  try{connectSSE();}catch(e){}
+  setInterval(()=>{loadDashboardLive();loadMapData();loadTimeline();},60000);
 });
 </script>
 </body>

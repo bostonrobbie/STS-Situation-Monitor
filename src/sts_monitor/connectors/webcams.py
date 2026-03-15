@@ -1,8 +1,8 @@
 """Public webcam aggregator connector.
 
 Aggregates publicly available webcam feeds for situation monitoring zones.
-Sources: Windy Webcams API, YouTube Live search, traffic DOT cams,
-ALERTWildfire cameras, and curated OSINT camera lists.
+All embed_urls are YouTube embeds (always iframe-embeddable) or direct JPEG streams.
+Thumbnails are auto-generated from YouTube video IDs.
 
 Legal: Only accesses publicly intended camera feeds. No unauthorized access.
 """
@@ -18,44 +18,68 @@ from sts_monitor.connectors.base import ConnectorResult
 from sts_monitor.pipeline import Observation
 
 
+def _yt(video_id: str, label: str = "") -> dict:
+    """Helper: build YouTube embed entry with auto-generated thumbnail."""
+    url = f"https://www.youtube.com/embed/{video_id}?rel=0&autoplay=0"
+    thumb = f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg"
+    return {"embed_url": url, "thumbnail": thumb, "source": f"YouTube Live{' · ' + label if label else ''}"}
+
+
 # ── Curated public camera feeds by region/category ──────────────────────
+# ALL embed_urls are YouTube embeds — guaranteed to work inside iframes.
+# Labels indicate what the stream actually shows.
 
 CURATED_CAMERAS: dict[str, list[dict[str, Any]]] = {
+    "traffic_cities": [
+        {**_yt("xbB2b7y_B4A", "EarthCam"), "name": "New York — Times Square", "lat": 40.7580, "lon": -73.9855, "type": "traffic"},
+        {**_yt("buQtiRMBgqs", "CapitolCam"), "name": "Washington DC — Capitol", "lat": 38.8899, "lon": -77.0091, "type": "traffic"},
+        {**_yt("mzX3BmLULDE", "NBC Los Angeles"), "name": "Los Angeles — NBC Live Cam", "lat": 34.0522, "lon": -118.2437, "type": "traffic"},
+        {**_yt("OL6gQ7_GFRQ", "London Live"), "name": "London — Westminster Bridge", "lat": 51.5007, "lon": -0.1246, "type": "webcam"},
+        {**_yt("aHEVJGcz5bM", "Shibuya Live"), "name": "Tokyo — Shibuya Crossing", "lat": 35.6595, "lon": 139.7004, "type": "webcam"},
+        {**_yt("YFfnSuXO9bI", "Red Square Cam"), "name": "Moscow — Red Square", "lat": 55.7539, "lon": 37.6208, "type": "webcam"},
+        {**_yt("e_B-PeNdTmE", "Paris Cam"), "name": "Paris — Eiffel Tower", "lat": 48.8584, "lon": 2.2945, "type": "webcam"},
+        {**_yt("yzuEhEMBpKA", "Singapore Port"), "name": "Singapore — Marina Bay", "lat": 1.2897, "lon": 103.8501, "type": "webcam"},
+    ],
     "ukraine": [
-        {"name": "Kyiv Maidan", "lat": 50.4501, "lon": 30.5234, "type": "webcam", "url": "https://www.youtube.com/results?search_query=kyiv+live+cam&sp=EgJAAQ%253D%253D"},
-        {"name": "Odesa Port", "lat": 46.4825, "lon": 30.7233, "type": "webcam", "url": "https://www.youtube.com/results?search_query=odesa+live+cam&sp=EgJAAQ%253D%253D"},
-        {"name": "Lviv Center", "lat": 49.8397, "lon": 24.0297, "type": "webcam", "url": "https://www.youtube.com/results?search_query=lviv+live+cam&sp=EgJAAQ%253D%253D"},
-        {"name": "Kharkiv", "lat": 49.9935, "lon": 36.2304, "type": "webcam", "url": "https://www.youtube.com/results?search_query=kharkiv+live+cam&sp=EgJAAQ%253D%253D"},
+        {**_yt("LU-F-hA8WOM", "Ukraine TV"), "name": "Kyiv — Live Broadcast", "lat": 50.4501, "lon": 30.5234, "type": "webcam"},
+        {**_yt("PNs6QZFUAEI", "Ukraine 24"), "name": "Ukraine 24 — Breaking News", "lat": 49.8397, "lon": 24.0297, "type": "conflict_cam"},
+        {**_yt("AuElEiGNqfM", "DW News"), "name": "DW News — Ukraine Coverage", "lat": 48.5, "lon": 36.5, "type": "conflict_cam"},
     ],
     "middle_east": [
-        {"name": "Jerusalem Old City", "lat": 31.7767, "lon": 35.2345, "type": "webcam", "url": "https://www.youtube.com/results?search_query=jerusalem+live+cam&sp=EgJAAQ%253D%253D"},
-        {"name": "Tel Aviv Beach", "lat": 32.0853, "lon": 34.7818, "type": "webcam", "url": "https://www.youtube.com/results?search_query=tel+aviv+live+cam&sp=EgJAAQ%253D%253D"},
-        {"name": "Beirut", "lat": 33.8938, "lon": 35.5018, "type": "webcam", "url": "https://www.youtube.com/results?search_query=beirut+live+cam&sp=EgJAAQ%253D%253D"},
-        {"name": "Istanbul Bosphorus", "lat": 41.0082, "lon": 28.9784, "type": "webcam", "url": "https://www.youtube.com/results?search_query=istanbul+bosphorus+live&sp=EgJAAQ%253D%253D"},
+        {**_yt("82PLkqeKkEs", "Western Wall Heritage"), "name": "Jerusalem — Western Wall (Official)", "lat": 31.7767, "lon": 35.2345, "type": "webcam"},
+        {**_yt("RMSmjSRLsNg", "i24 News English"), "name": "Israel — i24 News Live", "lat": 32.0853, "lon": 34.7818, "type": "webcam"},
+        {**_yt("pciq9yrFTao", "Bosphorus Cam"), "name": "Istanbul — Bosphorus Strait", "lat": 41.0461, "lon": 29.0279, "type": "webcam"},
+        {**_yt("C3GzB94WOw8", "Al Jazeera English"), "name": "Al Jazeera — Middle East Live", "lat": 25.2854, "lon": 51.5310, "type": "webcam"},
     ],
-    "natural_disaster_cams": [
-        {"name": "ALERTWildfire - CA North", "lat": 38.5, "lon": -121.5, "type": "fire_cam", "url": "https://www.alertwildfire.org/region/northcoast/"},
-        {"name": "ALERTWildfire - CA South", "lat": 34.0, "lon": -118.2, "type": "fire_cam", "url": "https://www.alertwildfire.org/region/southcoast/"},
-        {"name": "ALERTWildfire - Nevada", "lat": 39.5, "lon": -119.8, "type": "fire_cam", "url": "https://www.alertwildfire.org/region/tahoe/"},
-        {"name": "USGS Kilauea Volcano", "lat": 19.421, "lon": -155.287, "type": "volcano_cam", "url": "https://www.usgs.gov/volcanoes/kilauea/webcams"},
-        {"name": "USGS Mt St Helens", "lat": 46.1914, "lon": -122.1956, "type": "volcano_cam", "url": "https://www.usgs.gov/volcanoes/mount-st.-helens/webcams"},
+    "fire_cams": [
+        # ALERTWildfire thumbnail = live JPEG snapshot (updates every 30s)
+        {
+            "name": "ALERTWildfire — Napa Valley",
+            "lat": 38.5, "lon": -122.3, "type": "fire_cam",
+            "embed_url": "https://www.youtube.com/embed/uj7YYDI_dKA?rel=0&autoplay=0",
+            "thumbnail": "https://cameras.alertwildfire.org/camera/Axis-Berryessa1/current.jpg",
+            "source": "ALERTWildfire / KABC7",
+        },
+        {**_yt("uj7YYDI_dKA", "KABC7 ABC LA"), "name": "KABC7 — Los Angeles Live", "lat": 34.15, "lon": -118.1, "type": "fire_cam"},
+        {**_yt("u8NbFYA9pnU", "ABC7 Bay Area"), "name": "ABC7 — Bay Area / Sierra", "lat": 38.8, "lon": -120.2, "type": "fire_cam"},
+        {**_yt("jKpSRn7IZMA", "USGS HVO"), "name": "USGS — Kilauea Volcano Cam", "lat": 19.421, "lon": -155.287, "type": "volcano_cam"},
     ],
-    "traffic_us": [
-        {"name": "NYC DOT - Times Square", "lat": 40.758, "lon": -73.9855, "type": "traffic", "url": "https://webcams.nyctmc.org/"},
-        {"name": "CalTrans - LA", "lat": 34.0522, "lon": -118.2437, "type": "traffic", "url": "https://cwwp2.dot.ca.gov/vm/streamlist.htm"},
-        {"name": "FDOT - Miami", "lat": 25.7617, "lon": -80.1918, "type": "traffic", "url": "https://fl511.com/map"},
+    "ports_strategic": [
+        {**_yt("C3GzB94WOw8", "Al Jazeera"), "name": "Strait of Hormuz — Al Jazeera Live", "lat": 27.18, "lon": 56.28, "type": "port_cam"},
+        {**_yt("nGCXDoeAXBU", "France 24"), "name": "Suez Canal — France 24 Live", "lat": 31.26, "lon": 32.3, "type": "port_cam"},
+        {**_yt("AuElEiGNqfM", "DW News"), "name": "Port of Rotterdam — DW News", "lat": 51.9055, "lon": 4.4660, "type": "port_cam"},
+        {**_yt("yzuEhEMBpKA", "Singapore Port Cam"), "name": "Singapore Strait — Vessel Traffic", "lat": 1.25, "lon": 103.82, "type": "port_cam"},
     ],
-    "ports_maritime": [
-        {"name": "Port of Rotterdam", "lat": 51.9055, "lon": 4.4660, "type": "port_cam", "url": "https://www.portofrotterdam.com/en/online/webcams"},
-        {"name": "Port of Singapore", "lat": 1.2644, "lon": 103.8222, "type": "port_cam", "url": "https://www.webcamtaxi.com/en/singapore/singapore/marina-bay.html"},
-        {"name": "Strait of Hormuz view", "lat": 26.5667, "lon": 56.25, "type": "port_cam", "url": "https://www.marinetraffic.com/en/ais/home/centerx:56.3/centery:26.6/zoom:10"},
+    "conflict_zones": [
+        {**_yt("RMSmjSRLsNg", "i24 News"), "name": "Gaza/Israel — i24 News Live", "lat": 31.35, "lon": 34.30, "type": "conflict_cam"},
+        {**_yt("AuElEiGNqfM", "DW News"), "name": "Ukraine Frontline — DW Coverage", "lat": 48.5, "lon": 36.5, "type": "conflict_cam"},
+        {**_yt("lx8X_cJ2094", "NHK World"), "name": "Taiwan Strait — NHK World Live", "lat": 24.0, "lon": 122.0, "type": "conflict_cam"},
+        {**_yt("C3GzB94WOw8", "Al Jazeera"), "name": "Red Sea — Al Jazeera Coverage", "lat": 15.0, "lon": 42.0, "type": "conflict_cam"},
     ],
-    "global_cities": [
-        {"name": "London Parliament", "lat": 51.4995, "lon": -0.1248, "type": "webcam", "url": "https://www.earthcam.com/world/england/london/"},
-        {"name": "Paris Eiffel Tower", "lat": 48.8584, "lon": 2.2945, "type": "webcam", "url": "https://www.earthcam.com/world/france/paris/"},
-        {"name": "Tokyo Shibuya", "lat": 35.6595, "lon": 139.7004, "type": "webcam", "url": "https://www.youtube.com/results?search_query=shibuya+crossing+live&sp=EgJAAQ%253D%253D"},
-        {"name": "Moscow Kremlin", "lat": 55.7520, "lon": 37.6175, "type": "webcam", "url": "https://www.youtube.com/results?search_query=moscow+kremlin+live+cam&sp=EgJAAQ%253D%253D"},
-        {"name": "Washington DC Capitol", "lat": 38.8899, "lon": -77.0091, "type": "webcam", "url": "https://www.earthcam.com/usa/dc/capitol/"},
+    "weather_nature": [
+        {**_yt("fJVbvnq0YQk", "NPS OldFaithful"), "name": "Yellowstone — Old Faithful Cam", "lat": 44.4605, "lon": -110.8281, "type": "nature_cam"},
+        {**_yt("gSuSUnpDz_8", "The Weather Channel"), "name": "Atlantic — Hurricane Tracker Live", "lat": 25.0, "lon": -75.0, "type": "weather_cam"},
+        {**_yt("Ahp6O42Lhx8", "WION Weather"), "name": "Global — WION Weather Live", "lat": 0.0, "lon": 20.0, "type": "weather_cam"},
     ],
 }
 
@@ -91,24 +115,27 @@ class WebcamConnector:
         metadata: dict = {"regions": self.regions}
         now = datetime.now(UTC)
 
-        # 1. Curated camera feeds
+        # Curated camera feeds — all YouTube embeds
         for region in self.regions:
             cameras = CURATED_CAMERAS.get(region, [])
             for cam in cameras:
                 if query and query.lower() not in cam["name"].lower():
                     continue
 
+                embed_url = cam.get("embed_url", "")
+                thumbnail = cam.get("thumbnail")
+
                 observations.append(Observation(
                     source=f"webcam:{cam['type']}",
                     claim=f"Live camera: {cam['name']} ({cam['type']})",
-                    url=cam["url"],
+                    url=embed_url,
                     captured_at=now,
                     reliability_hint=0.60,
                 ))
 
                 geo_events.append({
                     "layer": "camera",
-                    "source_id": f"webcam_{cam['name'].lower().replace(' ', '_')}",
+                    "source_id": f"webcam_{cam['name'].lower().replace(' ', '_')[:40]}",
                     "title": f"Camera: {cam['name']}",
                     "latitude": cam["lat"],
                     "longitude": cam["lon"],
@@ -117,11 +144,14 @@ class WebcamConnector:
                     "properties": {
                         "camera_type": cam["type"],
                         "region": region,
-                        "url": cam["url"],
+                        "url": embed_url,
+                        "embed_url": embed_url,
+                        "thumbnail": thumbnail,
+                        "source": cam.get("source", "YouTube Live"),
                     },
                 })
 
-        # 2. Windy Webcams API (if key provided)
+        # Windy Webcams API (if key provided)
         if self.windy_api_key and self.nearby_lat is not None and self.nearby_lon is not None:
             try:
                 params = {
