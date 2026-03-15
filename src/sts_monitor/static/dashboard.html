@@ -162,6 +162,22 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,monospace;background:v
 .btnx.d:hover{background:var(--accent-red);border-color:var(--accent-red)}
 .empty{padding:20px 12px;font-size:11px;color:var(--text-secondary);text-align:center}
 ::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}::-webkit-scrollbar-thumb:hover{background:var(--border-bright)}
+#investigate-panel{position:fixed;top:0;right:0;width:400px;height:100vh;background:#0a0f1a;border-left:1px solid #2d3f58;z-index:500;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .3s ease;overflow:hidden}
+#investigate-panel.open{transform:translateX(0)}
+.inv-header{padding:14px 16px;border-bottom:1px solid #21293a;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:#0d1117}
+.inv-body{flex:1;overflow-y:auto;padding:0}
+.inv-section{padding:12px 16px;border-bottom:1px solid #1e293b}
+.inv-sec-title{font-size:9px;font-weight:700;color:#475569;letter-spacing:1.5px;margin-bottom:8px}
+.inv-event{background:#111827;border:1px solid #1e293b;border-radius:6px;padding:8px 10px;margin-bottom:6px;cursor:pointer}
+.inv-event:hover{border-color:#3b82f6}
+.inv-evt-title{font-size:11px;font-weight:600;color:#e2e8f0;margin-bottom:3px}
+.inv-evt-meta{font-size:9px;color:#64748b;display:flex;gap:8px}
+.inv-stat{text-align:center;flex:1}
+.inv-stat-v{font-size:18px;font-weight:700;color:#3b82f6}
+.inv-stat-l{font-size:9px;color:#64748b}
+.src-bar{display:flex;flex-direction:column;gap:3px}
+.src-row{display:flex;align-items:center;gap:6px;font-size:10px}
+.src-bar-fill{height:6px;border-radius:3px;background:#3b82f6;min-width:4px}
 </style>
 </head>
 <body>
@@ -216,6 +232,15 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,monospace;background:v
       </div>
       <div class="psec"><div class="ptitle">Discovered Topics <span class="pact" onclick="runDiscovery()">&#9654; Run</span></div><div id="discovered-topics"></div></div>
       <div class="psec"><div class="ptitle">Data Sources</div><div id="connector-list"></div></div>
+      <div class="psec">
+        <div class="ptitle">Intelligence Tools</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <button class="btns" style="width:100%;text-align:left;font-size:10px" onclick="openWatchRules()">🎯 Watch Rules</button>
+          <button class="btns" style="width:100%;text-align:left;font-size:10px" onclick="openSubscriptions()">📌 Subscriptions</button>
+          <button class="btns" style="width:100%;text-align:left;font-size:10px" onclick="openEntityGraph()">🕸 Entity Graph</button>
+          <button class="btns" style="width:100%;text-align:left;font-size:10px" onclick="document.getElementById('rp-situations-section').style.display='';loadSituations();setRpFilter('all')">🔴 Situations</button>
+        </div>
+      </div>
     </div>
     <!-- WAR view left panel -->
     <div id="lp-war" style="display:none">
@@ -292,9 +317,17 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,monospace;background:v
     <div class="mtbar">
       <button class="mbtn active" onclick="setMapStyle('dark',this)" data-style="dark">Dark</button>
       <button class="mbtn" onclick="setMapStyle('satellite',this)" data-style="satellite">Satellite</button>
+      <button class="mbtn" onclick="setMapStyle('nasa',this)" data-style="nasa">🛰 NASA SAT</button>
       <button class="mbtn active" id="heat-btn" onclick="toggleHeat(this)">Heatmap</button>
       <button class="mbtn" onclick="detectConvergence()">&#8853; Convergence</button>
       <button class="mbtn" onclick="refreshAll()">&#8635; Refresh</button>
+    </div>
+    <!-- Timeline Scrubber (Feature 7) -->
+    <div id="timeline-bar" style="position:absolute;bottom:28px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;background:rgba(10,15,26,.9);border:1px solid #2d3f58;border-radius:20px;padding:6px 14px;z-index:10;backdrop-filter:blur(4px)">
+      <button onclick="resetTimeline()" style="background:none;border:none;color:#64748b;font-size:11px;cursor:pointer;padding:0">⟳</button>
+      <input type="range" id="timeline-slider" min="0" max="720" value="0" step="1" style="width:200px;accent-color:#3b82f6;cursor:pointer">
+      <span id="timeline-label" style="font-size:10px;color:#94a3b8;min-width:120px;text-align:center">NOW</span>
+      <span style="font-size:9px;color:#475569">← 30 days</span>
     </div>
     <div class="minfo">zoom: <span id="map-zoom">2.5</span> | <span id="map-ctr">20.0, 25.0</span></div>
   </div>
@@ -329,8 +362,17 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,monospace;background:v
         <div class="rp-sec-hdr">⊕ CONVERGENCE ZONES</div>
         <div style="padding:4px 8px" id="convergence-zones"></div>
       </div>
+      <!-- Developing Situations section (Feature 4) -->
+      <div id="rp-situations-section" class="rp-section" style="display:none">
+        <div class="rp-sec-hdr">🔴 DEVELOPING SITUATIONS</div>
+        <div id="situations-feed" style="padding:6px 8px"></div>
+      </div>
       <!-- Main event feed -->
       <div id="rp-feed-section" class="rp-section">
+        <div id="top-events-section">
+          <div class="rp-sec-hdr">⚡ HIGHEST IMPORTANCE</div>
+          <div id="top-events-feed"></div>
+        </div>
         <div id="event-feed"></div>
       </div>
       <!-- Alert feed -->
@@ -344,8 +386,96 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,monospace;background:v
       <div class="brf-c" id="brf-body">
         <div class="brf-load" id="brf-loading"><div class="spinner"></div><span>Generating intelligence briefing...</span><span style="font-size:10px;color:var(--text-dim)">30-90 seconds (local LLM)</span></div>
         <div class="brf-txt" id="brf-text" style="display:none"></div>
+        <div id="brf-verification" style="display:none;padding:10px 16px;border-top:1px solid var(--border);font-size:10px;background:rgba(0,0,0,.2)"></div>
       </div>
-      <div class="brf-meta"><span id="brf-ts">Not yet generated</span><button class="btnx" onclick="loadBriefing(true)">&#8635; Refresh</button></div>
+      <div class="brf-meta"><span id="brf-ts">Not yet generated</span><button class="btnx" onclick="verifyBriefing()" style="margin-right:6px">✓ Verify</button><button class="btnx" onclick="loadBriefing(true)">&#8635; Refresh</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- Investigate Panel (Feature 2) -->
+<div id="investigate-panel">
+  <div class="inv-header">
+    <div>
+      <div style="font-size:12px;font-weight:700" id="inv-title">🔍 Location Dossier</div>
+      <div style="font-size:10px;color:#64748b" id="inv-coords"></div>
+    </div>
+    <button onclick="closeInvestigate()" style="background:none;border:none;color:#64748b;font-size:18px;cursor:pointer">✕</button>
+  </div>
+  <div class="inv-body" id="inv-body">
+    <div style="padding:30px;text-align:center;color:#475569">Loading dossier…</div>
+  </div>
+</div>
+
+<!-- Watch Rules Panel (Feature 3) - modal -->
+<div id="watch-rules-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:600;align-items:center;justify-content:center">
+  <div style="background:#0d1117;border:1px solid #2d3f58;border-radius:12px;width:520px;max-height:80vh;overflow:hidden;display:flex;flex-direction:column">
+    <div style="padding:14px 18px;border-bottom:1px solid #21293a;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-weight:700;font-size:14px">🎯 Watch Rules</span>
+      <button onclick="document.getElementById('watch-rules-modal').style.display='none'" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer">✕</button>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:14px">
+      <!-- New rule form -->
+      <div style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:12px;margin-bottom:14px">
+        <div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:1px;margin-bottom:10px">ADD NEW RULE</div>
+        <input id="wr-name" placeholder="Rule name (e.g. Boston High Alert)" class="linput" style="width:100%;margin-bottom:6px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
+          <input id="wr-lat" placeholder="Lat" class="linput" type="number" step="0.01">
+          <input id="wr-lon" placeholder="Lon" class="linput" type="number" step="0.01">
+          <input id="wr-radius" placeholder="Radius km" class="linput" type="number" value="50">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+          <input id="wr-mag" placeholder="Min magnitude" class="linput" type="number" step="0.5" value="5.0">
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#94a3b8">
+            <input type="checkbox" id="wr-telegram"> Telegram alert
+          </label>
+        </div>
+        <button class="btnp" onclick="saveWatchRule()" style="width:100%">+ Add Rule</button>
+      </div>
+      <!-- Rule list -->
+      <div id="watch-rules-list"><div style="color:#475569;font-size:11px;text-align:center;padding:20px">Loading rules…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Subscriptions Modal (Feature 9) -->
+<div id="subscriptions-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:600;align-items:center;justify-content:center">
+  <div style="background:#0d1117;border:1px solid #2d3f58;border-radius:12px;width:480px;max-height:75vh;overflow:hidden;display:flex;flex-direction:column">
+    <div style="padding:14px 18px;border-bottom:1px solid #21293a;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-weight:700;font-size:14px">📌 Location Subscriptions</span>
+      <button onclick="document.getElementById('subscriptions-modal').style.display='none'" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer">✕</button>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:14px">
+      <div style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:12px;margin-bottom:14px">
+        <div style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:1px;margin-bottom:8px">SUBSCRIBE TO LOCATION</div>
+        <input id="sub-name" placeholder="Display name (e.g. My Hometown)" class="linput" style="width:100%;margin-bottom:6px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+          <input id="sub-city" placeholder="City" class="linput">
+          <input id="sub-state" placeholder="State" class="linput">
+        </div>
+        <button class="btnp" onclick="saveSubscription()" style="width:100%">📌 Subscribe</button>
+      </div>
+      <div id="subscriptions-list"><div style="color:#475569;font-size:11px;text-align:center;padding:20px">Loading subscriptions…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Entity Graph Modal (Feature 11) -->
+<div id="entity-graph-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:700;align-items:center;justify-content:center">
+  <div style="background:#0d1117;border:1px solid #2d3f58;border-radius:12px;width:90vw;max-width:900px;height:80vh;overflow:hidden;display:flex;flex-direction:column">
+    <div style="padding:12px 18px;border-bottom:1px solid #21293a;display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+      <span style="font-weight:700;font-size:14px">🕸 Entity Relationship Graph</span>
+      <div style="display:flex;gap:10px;align-items:center">
+        <span id="entity-graph-stats" style="font-size:11px;color:#64748b"></span>
+        <button onclick="document.getElementById('entity-graph-modal').style.display='none'" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer">✕</button>
+      </div>
+    </div>
+    <div style="flex:1;position:relative">
+      <canvas id="entity-graph-canvas" style="width:100%;height:100%"></canvas>
+      <div id="entity-graph-empty" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#475569;font-size:13px;flex-direction:column;gap:8px">
+        <span style="font-size:32px">🕸</span>
+        <span>No entity data yet. Run LLM enrichment to extract entities from events.</span>
+      </div>
     </div>
   </div>
 </div>
@@ -427,16 +557,59 @@ function initMap(){
       if(pr.squawk&&pr.squawk!='0')ex+=`<br>Squawk: <b>${pr.squawk}</b>`;
       const col=lc(p.layer);
       new maplibregl.Popup({maxWidth:'280px'}).setLngLat(e.lngLat).setHTML(`<div style="color:#111;font-family:sans-serif;font-size:12px;max-width:260px"><div style="font-weight:700;margin-bottom:4px">${esc((p.title||'').substring(0,130))}</div><div style="font-size:11px;color:#555">Layer: <span style="color:${col};font-weight:700">${p.layer}</span>${p.magnitude?` | ${p.layer==='earthquake'?'M':'&#9889;'}${Number(p.magnitude).toFixed(1)}`:''}</div><div style="font-size:10px;color:#888;margin-top:2px">${ago(p.event_time)} ago</div>${ex}</div>`).addTo(map);
+      // Also open investigate panel for context (right side)
+      openInvestigate(e.lngLat.lat, e.lngLat.lng, p.title||'');
+    });
+    map.on('contextmenu','events-circle',(e)=>{
+      const f=e.features&&e.features[0];
+      if(f){
+        const[lng,lat]=f.geometry.coordinates;
+        openInvestigate(lat,lng,f.properties.title);
+      }
     });
     map.on('mouseenter','events-circle',()=>map.getCanvas().style.cursor='pointer');
     map.on('mouseleave','events-circle',()=>map.getCanvas().style.cursor='');
     loadMapData();
     let mt=null;
-    map.on('moveend',()=>{clearTimeout(mt);mt=setTimeout(loadMapData,500);document.getElementById('map-zoom').textContent=map.getZoom().toFixed(1);const c=map.getCenter();document.getElementById('map-ctr').textContent=c.lat.toFixed(2)+','+c.lng.toFixed(2);updateRpContext();});
+    map.on('moveend',()=>{
+      clearTimeout(mt);
+      mt=setTimeout(loadMapData,500);
+      document.getElementById('map-zoom').textContent=map.getZoom().toFixed(1);
+      const c=map.getCenter();
+      document.getElementById('map-ctr').textContent=c.lat.toFixed(2)+','+c.lng.toFixed(2);
+      updateRpContext();
+      // Auto-filter right panel to current viewport
+      if(geoJsonData&&currentView!=='local'&&currentView!=='aviation'){
+        const b=map.getBounds();
+        const viewFeats=(geoJsonData.features||[]).filter(f=>{
+          const[lng,lat]=f.geometry?.coordinates||[0,0];
+          return lat>=b.getSouth()&&lat<=b.getNorth()&&lng>=b.getWest()&&lng<=b.getEast();
+        });
+        if(viewFeats.length>0){
+          renderEventFeed(viewFeats.map(f=>({...f.properties,latitude:f.geometry.coordinates[1],longitude:f.geometry.coordinates[0]})));
+          const countEl=document.getElementById('rp-ctx-count');
+          if(countEl)countEl.textContent=viewFeats.length+' events in view';
+        }
+      }
+    });
   });
 }
 
 function setMapStyle(s,btn){
+  if(s==='nasa'){
+    document.querySelectorAll('.mbtn[data-style]').forEach(b=>b.classList.toggle('active',b===btn));
+    const today=new Date().toISOString().split('T')[0];
+    if(!map.getSource('nasa-gibs')){
+      map.addSource('nasa-gibs',{type:'raster',
+        tiles:[`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${today}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`],
+        tileSize:256,attribution:'NASA GIBS'});
+      map.addLayer({id:'nasa-gibs-layer',type:'raster',source:'nasa-gibs',paint:{'raster-opacity':0.9}},map.getLayer('water')?'water':undefined);
+    } else {
+      map.setLayoutProperty('nasa-gibs-layer','visibility','visible');
+    }
+    return;
+  }
+  if(map.getLayer&&map.getLayer('nasa-gibs-layer'))map.setLayoutProperty('nasa-gibs-layer','visibility','none');
   const styles={dark:'/static/map-style.json',satellite:'/static/map-style.json'};
   document.querySelectorAll('.mbtn[data-style]').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
   map.setStyle(styles[s]||styles.dark);
@@ -894,6 +1067,376 @@ function setLocalScope(s){
   updateRpContext();
   if(userLocation)loadLocalIntelligence();
 }
+// ═══════════════════════════════════════════════════════
+// FEATURE 2: Click-to-Investigate
+// ═══════════════════════════════════════════════════════
+function closeInvestigate(){document.getElementById('investigate-panel').classList.remove('open');}
+
+async function openInvestigate(lat,lon,title){
+  const panel=document.getElementById('investigate-panel');
+  const body=document.getElementById('inv-body');
+  const coordEl=document.getElementById('inv-coords');
+  const titleEl=document.getElementById('inv-title');
+  panel.classList.add('open');
+  titleEl.textContent=title?`🔍 ${title.substring(0,40)}…`:'🔍 Location Dossier';
+  coordEl.textContent=`${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E`;
+  body.innerHTML='<div style="padding:30px;text-align:center;color:#475569"><div class="spinner" style="margin:0 auto 10px"></div>Loading dossier…</div>';
+  const d=await apiFetch(`/dashboard/investigate?lat=${lat}&lon=${lon}&radius_km=20&days=7`);
+  if(!d){body.innerHTML='<div style="padding:20px;color:#ef4444">Failed to load dossier.</div>';return;}
+
+  const layerColors=Object.fromEntries(Object.entries(LAYERS).map(([k,v])=>[k,v.color]));
+  const srcEntries=Object.entries(d.source_breakdown||{}).sort((a,b)=>b[1]-a[1]);
+  const maxSrc=srcEntries[0]?.[1]||1;
+
+  body.innerHTML=`
+    <div class="inv-section" style="background:#0a0f1a">
+      <div style="display:flex;gap:0">
+        <div class="inv-stat"><div class="inv-stat-v">${d.event_count||0}</div><div class="inv-stat-l">Events (7d)</div></div>
+        <div class="inv-stat"><div class="inv-stat-v" style="color:#f59e0b">${d.predicted_importance?.toFixed(1)||'—'}</div><div class="inv-stat-l">Importance</div></div>
+        <div class="inv-stat"><div class="inv-stat-v" style="color:#22c55e">${Object.keys(d.layer_breakdown||{}).length}</div><div class="inv-stat-l">Data Layers</div></div>
+      </div>
+    </div>
+    ${srcEntries.length?`<div class="inv-section">
+      <div class="inv-sec-title">SOURCE BREAKDOWN</div>
+      <div class="src-bar">${srcEntries.slice(0,8).map(([src,cnt])=>`
+        <div class="src-row">
+          <span style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#94a3b8">${esc(src)}</span>
+          <div class="src-bar-fill" style="width:${Math.round(cnt/maxSrc*80)}px"></div>
+          <span style="color:#64748b">${cnt}</span>
+        </div>`).join('')}</div>
+    </div>`:''}
+    ${d.entities?.length?`<div class="inv-section">
+      <div class="inv-sec-title">ENTITIES MENTIONED</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">${d.entities.slice(0,12).map(e=>`<span style="background:rgba(139,92,246,.15);color:#a78bfa;font-size:9px;padding:2px 7px;border-radius:10px;border:1px solid rgba(139,92,246,.2)">${esc(e.name)}</span>`).join('')}</div>
+    </div>`:''}
+    <div class="inv-section">
+      <div class="inv-sec-title">RECENT EVENTS AT THIS LOCATION</div>
+      ${(d.events||[]).slice(0,10).map(e=>`
+        <div class="inv-event" onclick="flyToEvent(${lat},${lon})">
+          <div class="inv-evt-title">${esc((e.title||'').substring(0,100))}</div>
+          <div class="inv-evt-meta">
+            <span style="color:${layerColors[e.layer]||'#64748b'}">${(e.layer||'').replace(/_/g,' ')}</span>
+            <span>${ago(e.event_time)}</span>
+            ${e.magnitude?`<span>M${Number(e.magnitude).toFixed(1)}</span>`:''}
+          </div>
+        </div>`).join('')||'<div style="color:#475569;font-size:11px;padding:8px">No events found at this location.</div>'}
+    </div>
+    <div class="inv-section">
+      <button class="btnp" style="width:100%;font-size:11px" onclick="runResearch(${lat},${lon},'${esc(title||'Situation')}')">🔬 Run OSINT Research</button>
+    </div>
+  `;
+}
+
+async function runResearch(lat, lon, title){
+  const body=document.getElementById('inv-body');
+  const resDiv=document.createElement('div');
+  resDiv.className='inv-section';
+  resDiv.innerHTML='<div class="inv-sec-title">🔬 OSINT RESEARCH</div><div style="color:#475569;font-size:11px;padding:8px">Running research… (this may take 30-60 seconds)</div>';
+  body.appendChild(resDiv);
+  const d=await apiFetch('/dashboard/research',{method:'POST',body:JSON.stringify({title,summary:'',lat,lon})});
+  if(!d){resDiv.innerHTML+='<div style="color:#ef4444;font-size:11px;padding:8px">Research failed.</div>';return;}
+  resDiv.innerHTML=`<div class="inv-sec-title">🔬 OSINT RESEARCH (${d.articles_found} sources)</div>
+    <div style="font-size:10px;color:#94a3b8;margin-bottom:8px">Queries: ${(d.queries_run||[]).join(', ')}</div>
+    <div style="font-size:11px;line-height:1.6;color:#e2e8f0;white-space:pre-wrap">${esc(d.dossier||'No dossier generated.')}</div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+// FEATURE 3: Watch Rules
+// ═══════════════════════════════════════════════════════
+async function openWatchRules(){
+  document.getElementById('watch-rules-modal').style.display='flex';
+  await loadWatchRules();
+}
+
+async function loadWatchRules(){
+  const el=document.getElementById('watch-rules-list');
+  const rules=await apiFetch('/dashboard/watch-rules');
+  if(!rules||!rules.length){el.innerHTML='<div style="color:#475569;font-size:11px;text-align:center;padding:16px">No watch rules yet. Add one above.</div>';return;}
+  el.innerHTML=rules.map(r=>`
+    <div style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:10px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#e2e8f0">${esc(r.name)}</div>
+        <div style="font-size:10px;color:#64748b">${r.lat.toFixed(3)}, ${r.lon.toFixed(3)} · ${r.radius_km}km · M≥${r.min_magnitude}${r.notify_telegram?' 📱':''}</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span style="font-size:9px;padding:2px 6px;border-radius:10px;background:${r.is_active?'rgba(34,197,94,.15)':'rgba(100,116,139,.15)'};color:${r.is_active?'#22c55e':'#64748b'}">${r.is_active?'ACTIVE':'OFF'}</span>
+        <button onclick="deleteWatchRule(${r.id})" style="background:none;border:none;color:#475569;cursor:pointer;font-size:14px">🗑</button>
+      </div>
+    </div>`).join('');
+}
+
+async function saveWatchRule(){
+  const name=document.getElementById('wr-name').value.trim();
+  const lat=parseFloat(document.getElementById('wr-lat').value)||42.36;
+  const lon=parseFloat(document.getElementById('wr-lon').value)||-71.06;
+  const radius=parseFloat(document.getElementById('wr-radius').value)||50;
+  const mag=parseFloat(document.getElementById('wr-mag').value)||5.0;
+  const telegram=document.getElementById('wr-telegram').checked;
+  if(!name){alert('Rule name required');return;}
+  await apiFetch('/dashboard/watch-rules',{method:'POST',body:JSON.stringify({name,lat,lon,radius_km:radius,min_magnitude:mag,notify_telegram:telegram})});
+  document.getElementById('wr-name').value='';
+  await loadWatchRules();
+}
+
+async function deleteWatchRule(id){
+  await apiFetch(`/dashboard/watch-rules/${id}`,{method:'DELETE'});
+  await loadWatchRules();
+}
+
+// ═══════════════════════════════════════════════════════
+// FEATURE 4: Developing Situations
+// ═══════════════════════════════════════════════════════
+async function loadSituations(){
+  const el=document.getElementById('situations-feed');
+  if(!el)return;
+  const d=await apiFetch('/dashboard/situations?limit=5');
+  const sits=d?.situations||[];
+  const sec=document.getElementById('rp-situations-section');
+  if(!sits.length){if(sec)sec.style.display='none';return;}
+  if(sec)sec.style.display='';
+  const sevColor={critical:'#ef4444',high:'#f59e0b',medium:'#3b82f6',low:'#22c55e'};
+  el.innerHTML=sits.map(s=>`
+    <div style="background:#111827;border:1px solid ${sevColor[s.severity]||'#1e293b'}33;border-left:3px solid ${sevColor[s.severity]||'#3b82f6'};border-radius:6px;padding:8px 10px;margin-bottom:6px;cursor:pointer"
+         onclick="flyToEvent(${s.center_lat},${s.center_lon});openInvestigate(${s.center_lat},${s.center_lon},'${esc(s.title)}')">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+        <span style="font-size:9px;font-weight:700;color:${sevColor[s.severity]||'#3b82f6'};letter-spacing:.5px">${(s.severity||'').toUpperCase()}</span>
+        <span style="font-size:9px;color:#475569">${s.signal_count} signals · ${s.predicted_importance}/10</span>
+      </div>
+      <div style="font-size:11px;font-weight:600;color:#e2e8f0;margin-bottom:3px">${esc((s.title||'').substring(0,80))}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:3px">${(s.layers||[]).map(l=>`<span style="font-size:8px;background:rgba(255,255,255,.06);color:#94a3b8;padding:1px 5px;border-radius:3px">${l.replace(/_/g,' ')}</span>`).join('')}</div>
+    </div>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════
+// FEATURE 6: Briefing Verification
+// ═══════════════════════════════════════════════════════
+async function verifyBriefing(){
+  const briefingEl=document.getElementById('brf-text');
+  if(!briefingEl||!briefingEl.textContent.trim()){alert('Generate a briefing first.');return;}
+  const verBtn=document.querySelector('[onclick="verifyBriefing()"]');
+  if(verBtn){verBtn.textContent='⏳ Verifying…';verBtn.disabled=true;}
+  const d=await apiFetch('/dashboard/briefing/verify',{method:'POST',body:JSON.stringify({briefing:briefingEl.textContent})});
+  if(verBtn){verBtn.textContent='✓ Verify';verBtn.disabled=false;}
+  if(!d?.verification)return;
+  const v=d.verification;
+  const verdictColor={RELIABLE:'#22c55e',MOSTLY_RELIABLE:'#84cc16',MIXED:'#f59e0b',UNRELIABLE:'#ef4444',VERIFICATION_FAILED:'#64748b'}[v.verdict]||'#64748b';
+  const verDiv=document.getElementById('brf-verification');
+  if(verDiv){
+    verDiv.style.display='block';
+    verDiv.innerHTML=`
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <span style="font-size:11px;font-weight:700;color:${verdictColor}">● ${v.verdict||'UNKNOWN'}</span>
+        <span style="font-size:10px;color:#64748b">Confidence: ${Math.round((v.overall_confidence||0)*100)}%</span>
+      </div>
+      ${v.bias_assessment?`<div style="font-size:10px;color:#94a3b8;margin-bottom:8px">⚖️ ${esc(v.bias_assessment)}</div>`:''}
+      ${(v.corroborated_claims||[]).length?`<div style="font-size:9px;font-weight:700;color:#22c55e;margin-bottom:4px">✓ CORROBORATED (${v.corroborated_claims.length})</div>
+        ${v.corroborated_claims.slice(0,3).map(c=>`<div style="font-size:10px;color:#86efac;margin-bottom:3px">• ${esc(c)}</div>`).join('')}`:''}
+      ${(v.disputed_claims||[]).length?`<div style="font-size:9px;font-weight:700;color:#ef4444;margin-top:6px;margin-bottom:4px">✗ DISPUTED (${v.disputed_claims.length})</div>
+        ${v.disputed_claims.slice(0,3).map(c=>`<div style="font-size:10px;color:#fca5a5;margin-bottom:3px">• ${esc(c)}</div>`).join('')}`:''}`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// FEATURE 7: Timeline Scrubber
+// ═══════════════════════════════════════════════════════
+let timelineActive=false,timelineTs=null;
+
+function initTimeline(){
+  const slider=document.getElementById('timeline-slider');
+  const label=document.getElementById('timeline-label');
+  if(!slider)return;
+  slider.addEventListener('input',()=>{
+    const hoursAgo=parseInt(slider.value);
+    const now=new Date();
+    const ts=new Date(now.getTime()-hoursAgo*3600000);
+    label.textContent=hoursAgo===0?'NOW':ts.toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    timelineTs=ts.toISOString();
+    timelineActive=(hoursAgo>0);
+    clearTimeout(window._timelineDebounce);
+    window._timelineDebounce=setTimeout(loadHistoricalMap,600);
+  });
+}
+
+async function loadHistoricalMap(){
+  if(!timelineActive||!timelineTs)return;
+  const layers=[...activeLayers].join(',');
+  let url=`/dashboard/historical?before=${encodeURIComponent(timelineTs)}&hours=4&layers=${layers}&zoom=${Math.round(map?.getZoom()||3)}`;
+  if(map){const b=map.getBounds();url+=`&bbox=${b.getWest().toFixed(3)},${b.getSouth().toFixed(3)},${b.getEast().toFixed(3)},${b.getNorth().toFixed(3)}`;}
+  const data=await apiFetch(url);
+  if(!data)return;
+  if(map&&map.getSource('events'))map.getSource('events').setData(data);
+  document.getElementById('feature-count').textContent=`${data.count} events (historical)`;
+  renderEventFeed((data.features||[]).map(f=>({...f.properties,latitude:f.geometry.coordinates[1],longitude:f.geometry.coordinates[0]})));
+}
+
+function resetTimeline(){
+  const slider=document.getElementById('timeline-slider');
+  const label=document.getElementById('timeline-label');
+  if(slider)slider.value=0;
+  if(label)label.textContent='NOW';
+  timelineActive=false;timelineTs=null;
+  loadMapData();
+}
+
+// ═══════════════════════════════════════════════════════
+// FEATURE 9: Location Subscriptions
+// ═══════════════════════════════════════════════════════
+async function openSubscriptions(){
+  document.getElementById('subscriptions-modal').style.display='flex';
+  await loadSubscriptions();
+}
+
+async function loadSubscriptions(){
+  const el=document.getElementById('subscriptions-list');
+  const subs=await apiFetch('/dashboard/subscriptions');
+  if(!subs||!subs.length){el.innerHTML='<div style="color:#475569;font-size:11px;text-align:center;padding:16px">No subscriptions yet.</div>';return;}
+  el.innerHTML=subs.map(s=>`
+    <div style="background:#111827;border:1px solid #1e293b;border-radius:8px;padding:10px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#e2e8f0">📌 ${esc(s.display_name)}</div>
+        <div style="font-size:10px;color:#64748b">${s.city}${s.state?', '+s.state:''} · ${s.radius_km}km</div>
+        ${s.last_fetched_at?`<div style="font-size:9px;color:#475569">Last: ${ago(s.last_fetched_at)}</div>`:''}
+      </div>
+      <div style="display:flex;gap:6px">
+        <button onclick="loadSubIntel(${s.id},${s.lat},${s.lon},'${esc(s.display_name)}')" style="background:rgba(59,130,246,.1);border:1px solid #3b82f680;color:#3b82f6;border-radius:5px;padding:4px 8px;font-size:10px;cursor:pointer">View</button>
+        <button onclick="deleteSub(${s.id})" style="background:none;border:none;color:#475569;cursor:pointer;font-size:14px">🗑</button>
+      </div>
+    </div>`).join('');
+}
+
+async function saveSubscription(){
+  const name=document.getElementById('sub-name').value.trim();
+  const city=document.getElementById('sub-city').value.trim();
+  const state=document.getElementById('sub-state').value.trim();
+  if(!name||!city){alert('Display name and city required');return;}
+  // Geocode via Nominatim
+  let lat=42.36,lon=-71.06;
+  try{
+    const geo=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(city+' '+state)}&format=json&limit=1`,{headers:{'User-Agent':'STSIA/1.0'}});
+    const gd=await geo.json();
+    if(gd[0]){lat=parseFloat(gd[0].lat);lon=parseFloat(gd[0].lon);}
+  }catch(e){}
+  await apiFetch('/dashboard/subscriptions',{method:'POST',body:JSON.stringify({name,display_name:name,lat,lon,city,state,radius_km:100})});
+  document.getElementById('sub-name').value='';document.getElementById('sub-city').value='';document.getElementById('sub-state').value='';
+  await loadSubscriptions();
+}
+
+async function deleteSub(id){await apiFetch(`/dashboard/subscriptions/${id}`,{method:'DELETE'});await loadSubscriptions();}
+
+function loadSubIntel(id,lat,lon,name){
+  document.getElementById('subscriptions-modal').style.display='none';
+  userLocation={lat,lon,name};
+  localScope='city';
+  setView('local');
+  loadLocalIntelligence();
+}
+
+// ═══════════════════════════════════════════════════════
+// FEATURE 11: Entity Graph
+// ═══════════════════════════════════════════════════════
+async function openEntityGraph(){
+  document.getElementById('entity-graph-modal').style.display='flex';
+  const d=await apiFetch('/dashboard/entities/graph?hours=48&min_mentions=2');
+  if(!d){return;}
+  const statsEl=document.getElementById('entity-graph-stats');
+  const emptyEl=document.getElementById('entity-graph-empty');
+  if(statsEl)statsEl.textContent=`${d.total_entities} entities · ${d.edges?.length||0} relationships`;
+  if(!d.nodes||!d.nodes.length){if(emptyEl)emptyEl.style.display='flex';return;}
+  if(emptyEl)emptyEl.style.display='none';
+  renderEntityGraph(d.nodes,d.edges||[]);
+}
+
+function renderEntityGraph(nodes,edges){
+  const canvas=document.getElementById('entity-graph-canvas');
+  if(!canvas)return;
+  const rect=canvas.parentElement.getBoundingClientRect();
+  canvas.width=rect.width;canvas.height=rect.height;
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+
+  // Simple force-directed layout simulation
+  const positions={};
+  nodes.forEach((n,i)=>{
+    const angle=(i/nodes.length)*Math.PI*2;
+    const r=Math.min(W,H)*0.35;
+    positions[n.id]={x:W/2+r*Math.cos(angle),y:H/2+r*Math.sin(angle),vx:0,vy:0};
+  });
+
+  let frame=0;
+  const maxFrames=120;
+  function tick(){
+    if(frame++>maxFrames)return;
+    // Repulsion
+    nodes.forEach(a=>{nodes.forEach(b=>{
+      if(a.id===b.id)return;
+      const pa=positions[a.id],pb=positions[b.id];
+      const dx=pa.x-pb.x,dy=pa.y-pb.y;
+      const dist=Math.sqrt(dx*dx+dy*dy)+0.1;
+      const force=800/(dist*dist);
+      pa.vx+=dx/dist*force;pa.vy+=dy/dist*force;
+    });});
+    // Attraction along edges
+    edges.forEach(e=>{
+      const pa=positions[e.source],pb=positions[e.target];
+      if(!pa||!pb)return;
+      const dx=pb.x-pa.x,dy=pb.y-pa.y;
+      const dist=Math.sqrt(dx*dx+dy*dy)+0.1;
+      const force=dist*0.01;
+      pa.vx+=dx/dist*force;pa.vy+=dy/dist*force;
+      pb.vx-=dx/dist*force;pb.vy-=dy/dist*force;
+    });
+    // Center gravity
+    nodes.forEach(n=>{
+      const p=positions[n.id];
+      p.vx+=(W/2-p.x)*0.002;p.vy+=(H/2-p.y)*0.002;
+      p.vx*=0.85;p.vy*=0.85;
+      p.x+=p.vx;p.y+=p.vy;
+      p.x=Math.max(30,Math.min(W-30,p.x));
+      p.y=Math.max(30,Math.min(H-30,p.y));
+    });
+    // Draw
+    ctx.clearRect(0,0,W,H);
+    // Edges
+    edges.forEach(e=>{
+      const pa=positions[e.source],pb=positions[e.target];
+      if(!pa||!pb)return;
+      ctx.beginPath();ctx.moveTo(pa.x,pa.y);ctx.lineTo(pb.x,pb.y);
+      ctx.strokeStyle=`rgba(59,130,246,${Math.min(0.8,e.weight*0.2+0.1)})`;
+      ctx.lineWidth=Math.min(e.weight*0.5+0.5,2);ctx.stroke();
+    });
+    // Nodes
+    nodes.forEach(n=>{
+      const p=positions[n.id];
+      const r=Math.min(3+n.count*0.5,10);
+      ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);
+      ctx.fillStyle='#3b82f6';ctx.fill();
+      ctx.strokeStyle='#1d4ed8';ctx.lineWidth=1;ctx.stroke();
+      ctx.fillStyle='#e2e8f0';ctx.font=`${Math.min(9+n.count*0.3,13)}px sans-serif`;
+      ctx.fillText(n.id.substring(0,20),p.x+r+2,p.y+4);
+    });
+    requestAnimationFrame(tick);
+  }
+  tick();
+}
+
+// ═══════════════════════════════════════════════════════
+// FEATURE 13: Predicted Importance Indicator
+// ═══════════════════════════════════════════════════════
+async function loadTopEvents(){
+  const d=await apiFetch('/dashboard/predict?hours=24&top_n=8');
+  if(!d||!d.top_events)return;
+  const el=document.getElementById('top-events-feed');
+  if(!el)return;
+  el.innerHTML=d.top_events.map((e,i)=>`
+    <div class="evi" onclick="flyToEvent(${e.latitude},${e.longitude})" style="border-left:3px solid ${i<3?'#ef4444':i<5?'#f59e0b':'#3b82f6'}">
+      <div class="evh">
+        <span class="evlayer" style="background:rgba(239,68,68,.1);color:#ef4444">#${i+1} · ${(e.layer||'').replace(/_/g,' ')}</span>
+        <span class="evtime" style="color:${e.predicted_importance>=8?'#ef4444':e.predicted_importance>=6?'#f59e0b':'#64748b'}">${e.predicted_importance}/10</span>
+      </div>
+      <div class="evtitle">${esc((e.title||'').substring(0,140))}</div>
+    </div>`).join('');
+}
+
 function refreshAll(){
   const btn=document.querySelector('.mbtn[onclick="refreshAll()"]');
   if(btn){btn.disabled=true;btn.textContent='&#8635; Loading...';}
@@ -939,6 +1482,8 @@ function connectSSE(){
 
 document.addEventListener('DOMContentLoaded',()=>{
   initMap();loadDashboardLive();loadTimeline();loadDiscoveredTopics();renderConnectorStatus();
+  initTimeline();
+  setTimeout(()=>{loadSituations();loadTopEvents();},3000);
   try{connectSSE();}catch(e){}
   setInterval(()=>{loadDashboardLive();loadMapData();loadTimeline();},60000);
 });

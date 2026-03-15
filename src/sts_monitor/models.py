@@ -358,3 +358,58 @@ class CollectionPlanORM(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
 
     investigation: Mapped[InvestigationORM] = relationship()
+
+
+class GeoWatchRuleORM(Base):
+    """Geographic watch rule — fires when events match criteria within a radius."""
+    __tablename__ = "geo_watch_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lon: Mapped[float] = mapped_column(Float, nullable=False)
+    radius_km: Mapped[float] = mapped_column(Float, default=50.0)
+    min_magnitude: Mapped[float] = mapped_column(Float, default=5.0)
+    layers_json: Mapped[str] = mapped_column(Text, default='[]')   # JSON list of layers; empty=all
+    is_active: Mapped[bool] = mapped_column(default=True, index=True)
+    notify_telegram: Mapped[bool] = mapped_column(default=False)
+    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+
+class LocationSubscriptionORM(Base):
+    """Named location subscription — auto-fetches news/events for a saved place."""
+    __tablename__ = "location_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lon: Mapped[float] = mapped_column(Float, nullable=False)
+    radius_km: Mapped[float] = mapped_column(Float, default=100.0)
+    city: Mapped[str] = mapped_column(String(100), default='')
+    state: Mapped[str] = mapped_column(String(100), default='')
+    is_active: Mapped[bool] = mapped_column(default=True, index=True)
+    last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+
+class SituationORM(Base):
+    """Correlated situation — multiple sources reporting same area/event cluster."""
+    __tablename__ = "situations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, default='')
+    center_lat: Mapped[float] = mapped_column(Float, nullable=False)
+    center_lon: Mapped[float] = mapped_column(Float, nullable=False)
+    radius_km: Mapped[float] = mapped_column(Float, default=50.0)
+    severity: Mapped[str] = mapped_column(String(20), default='medium', index=True)  # low/medium/high/critical
+    signal_count: Mapped[int] = mapped_column(Integer, default=0)
+    layers_json: Mapped[str] = mapped_column(Text, default='[]')      # which layers are correlated
+    event_ids_json: Mapped[str] = mapped_column(Text, default='[]')   # list of GeoEventORM IDs
+    predicted_importance: Mapped[float] = mapped_column(Float, default=5.0)
+    is_active: Mapped[bool] = mapped_column(default=True, index=True)
+    research_json: Mapped[str] = mapped_column(Text, default='{}')    # OSINT research findings
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

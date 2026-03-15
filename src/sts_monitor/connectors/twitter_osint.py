@@ -359,3 +359,53 @@ class TwitterOSINTConnector:
             observations=observations,
             metadata={**metadata, "geo_events": geo_events},
         )
+
+
+def fetch_twitter_with_ntscraper(query: str, lat: float, lon: float, limit: int = 20) -> list:
+    """
+    Try to fetch real tweets via ntscraper (uses Nitter instances).
+    Falls back to LLM synthesis if Nitter is unavailable.
+    """
+    import random
+    from datetime import datetime, timezone, timedelta
+    import hashlib
+
+    events = []
+    try:
+        from ntscraper import Nitter
+        scraper = Nitter(log_level=0, skip_instance_check=False)
+        tweets = scraper.get_tweets(query, mode='term', number=limit)
+        tweet_list = tweets.get('tweets', [])
+
+        for tweet in tweet_list:
+            text = tweet.get('text', '')
+            if not text or len(text) < 10:
+                continue
+            username = tweet.get('user', {}).get('name', 'unknown')
+            likes = tweet.get('likes', 0)
+            sig = min(3.0 + likes / 200, 7.0)
+
+            # Add jitter around the query location
+            jlat = lat + random.uniform(-0.08, 0.08)
+            jlon = lon + random.uniform(-0.1, 0.1)
+            uid = hashlib.md5(text[:50].encode()).hexdigest()[:16]
+
+            events.append({
+                'source_id': f'twitter-{uid}',
+                'layer': 'social_intel',
+                'title': text[:200],
+                'lat': jlat,
+                'lon': jlon,
+                'magnitude': sig,
+                'event_time': datetime.now(timezone.utc),
+                'properties': {
+                    'source': f'Twitter/@{username}',
+                    'topic': query,
+                    'likes': likes,
+                    'layer_type': 'social_intel',
+                },
+            })
+    except Exception:
+        pass  # ntscraper failed — caller should use LLM fallback
+
+    return events

@@ -4397,3 +4397,455 @@ def get_enhanced_stats(
         "top_alert_magnitude": top_alert_magnitude,
         "generated_at": now.isoformat(),
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FEATURE EXPANSION: Watch Rules, Subscriptions, Situations, Investigate, etc.
+# ─────────────────────────────────────────────────────────────────────────────
+
+import math as _math_module
+
+from sts_monitor.models import GeoWatchRuleORM, LocationSubscriptionORM, SituationORM
+
+
+# ── Watch Rules (Feature 3) ────────────────────────────────────────────────
+
+@app.get("/dashboard/watch-rules")
+def list_watch_rules(auth=Depends(require_api_key), session: Session = Depends(get_session)):
+    """List all geo watch rules."""
+    rules = session.scalars(select(GeoWatchRuleORM).order_by(GeoWatchRuleORM.created_at.desc())).all()
+    return [{"id": r.id, "name": r.name, "lat": r.lat, "lon": r.lon,
+             "radius_km": r.radius_km, "min_magnitude": r.min_magnitude,
+             "layers": json.loads(r.layers_json or '[]'),
+             "is_active": r.is_active, "notify_telegram": r.notify_telegram,
+             "last_triggered_at": r.last_triggered_at.isoformat() if r.last_triggered_at else None,
+             "created_at": r.created_at.isoformat()} for r in rules]
+
+
+@app.post("/dashboard/watch-rules")
+def create_watch_rule(body: dict, auth=Depends(require_api_key), session: Session = Depends(get_session)):
+    """Create a new geo watch rule."""
+    rule = GeoWatchRuleORM(
+        name=body.get("name", "Unnamed Rule"),
+        lat=float(body["lat"]),
+        lon=float(body["lon"]),
+        radius_km=float(body.get("radius_km", 50)),
+        min_magnitude=float(body.get("min_magnitude", 5.0)),
+        layers_json=json.dumps(body.get("layers", [])),
+        is_active=bool(body.get("is_active", True)),
+        notify_telegram=bool(body.get("notify_telegram", False)),
+    )
+    session.add(rule)
+    session.commit()
+    session.refresh(rule)
+    return {"id": rule.id, "name": rule.name, "created": True}
+
+
+@app.delete("/dashboard/watch-rules/{rule_id}")
+def delete_watch_rule(rule_id: int, auth=Depends(require_api_key), session: Session = Depends(get_session)):
+    """Delete a watch rule."""
+    rule = session.get(GeoWatchRuleORM, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    session.delete(rule)
+    session.commit()
+    return {"deleted": True}
+
+
+@app.patch("/dashboard/watch-rules/{rule_id}")
+def toggle_watch_rule(rule_id: int, body: dict, auth=Depends(require_api_key), session: Session = Depends(get_session)):
+    """Toggle a watch rule active/inactive."""
+    rule = session.get(GeoWatchRuleORM, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    if "is_active" in body:
+        rule.is_active = bool(body["is_active"])
+    session.commit()
+    return {"id": rule_id, "is_active": rule.is_active}
+
+
+# ── Location Subscriptions (Feature 9) ────────────────────────────────────
+
+@app.get("/dashboard/subscriptions")
+def list_subscriptions(auth=Depends(require_api_key), session: Session = Depends(get_session)):
+    """List all location subscriptions."""
+    subs = session.scalars(select(LocationSubscriptionORM).order_by(LocationSubscriptionORM.created_at.desc())).all()
+    return [{"id": s.id, "name": s.name, "display_name": s.display_name,
+             "lat": s.lat, "lon": s.lon, "radius_km": s.radius_km,
+             "city": s.city, "state": s.state, "is_active": s.is_active,
+             "last_fetched_at": s.last_fetched_at.isoformat() if s.last_fetched_at else None,
+             "created_at": s.created_at.isoformat()} for s in subs]
+
+
+@app.post("/dashboard/subscriptions")
+def create_subscription(body: dict, auth=Depends(require_api_key), session: Session = Depends(get_session)):
+    """Subscribe to a location for auto-fetched intelligence."""
+    sub = LocationSubscriptionORM(
+        name=body.get("name", "").lower().replace(" ", "_"),
+        display_name=body.get("display_name", body.get("name", "Unknown")),
+        lat=float(body["lat"]),
+        lon=float(body["lon"]),
+        radius_km=float(body.get("radius_km", 100)),
+        city=body.get("city", ""),
+        state=body.get("state", ""),
+        is_active=True,
+    )
+    session.add(sub)
+    session.commit()
+    session.refresh(sub)
+    return {"id": sub.id, "display_name": sub.display_name, "created": True}
+
+
+@app.delete("/dashboard/subscriptions/{sub_id}")
+def delete_subscription(sub_id: int, auth=Depends(require_api_key), session: Session = Depends(get_session)):
+    """Remove a location subscription."""
+    sub = session.get(LocationSubscriptionORM, sub_id)
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    session.delete(sub)
+    session.commit()
+    return {"deleted": True}
+
+
+# ── Developing Situations (Feature 4) ──────────────────────────────────────
+
+@app.get("/dashboard/situations")
+def get_situations(
+    limit: int = 20,
+    auth=Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Get active developing situations (correlated multi-source events)."""
+    from sts_monitor.correlation import get_active_situations
+    return {"situations": get_active_situations(session, limit=limit)}
+
+
+@app.post("/dashboard/situations/run")
+def run_situation_detection(
+    hours: float = 6.0,
+    auth=Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Manually trigger signal correlation to detect developing situations."""
+    from sts_monitor.correlation import run_correlation
+    situations = run_correlation(session, hours=hours)
+    return {"detected": len(situations), "situations": situations[:10]}
+
+
+# ── Click-to-Investigate Dossier (Feature 2) ───────────────────────────────
+
+@app.get("/dashboard/investigate")
+def investigate_location(
+    lat: float,
+    lon: float,
+    radius_km: float = 15.0,
+    days: int = 7,
+    auth=Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """
+    Return a dossier for a clicked map location:
+    nearby events (past N days), entity mentions, source breakdown, timeline.
+    """
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    lat_delta = radius_km / 111.0
+    lon_delta = radius_km / (111.0 * abs(_math_module.cos(_math_module.radians(lat))) + 0.001)
+
+    rows = session.scalars(
+        select(GeoEventORM)
+        .where(GeoEventORM.event_time >= cutoff)
+        .where(GeoEventORM.latitude.between(lat - lat_delta, lat + lat_delta))
+        .where(GeoEventORM.longitude.between(lon - lon_delta, lon + lon_delta))
+        .order_by(GeoEventORM.magnitude.desc().nullslast(), GeoEventORM.event_time.desc())
+        .limit(50)
+    ).all()
+
+    events = []
+    source_counts: dict[str, int] = {}
+    layer_counts: dict[str, int] = {}
+    for r in rows:
+        props = json.loads(r.properties_json or '{}')
+        events.append({
+            "id": r.id,
+            "title": r.title,
+            "layer": r.layer,
+            "magnitude": r.magnitude,
+            "event_time": r.event_time.isoformat(),
+            "source": props.get("source", r.layer),
+            "url": props.get("url", ""),
+        })
+        src = props.get("source", r.layer)
+        source_counts[src] = source_counts.get(src, 0) + 1
+        layer_counts[r.layer] = layer_counts.get(r.layer, 0) + 1
+
+    # Entity mentions near this location
+    entities = session.scalars(
+        select(EntityMentionORM)
+        .where(EntityMentionORM.created_at >= cutoff)
+        .limit(20)
+    ).all()
+    entity_list = [{"name": e.entity_text, "type": e.entity_type, "count": 1}
+                   for e in entities]
+
+    from sts_monitor.predictive import score_event
+    top_score = max((score_event(e["title"], e["layer"], e.get("magnitude")) for e in events), default=0)
+
+    return {
+        "lat": lat, "lon": lon, "radius_km": radius_km,
+        "event_count": len(events),
+        "events": events[:20],
+        "source_breakdown": source_counts,
+        "layer_breakdown": layer_counts,
+        "entities": entity_list[:15],
+        "predicted_importance": top_score,
+        "days": days,
+    }
+
+
+# ── Entity Graph (Feature 11) ───────────────────────────────────────────────
+
+@app.get("/dashboard/entities/graph")
+def entity_graph(
+    hours: int = 48,
+    min_mentions: int = 2,
+    auth=Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Return entity relationship graph as nodes + edges for D3.js visualization."""
+    import networkx as nx
+
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+
+    try:
+        mentions = session.scalars(
+            select(EntityMentionORM)
+            .where(EntityMentionORM.created_at >= cutoff)
+            .limit(500)
+        ).all()
+    except Exception:
+        mentions = []
+
+    # Build co-occurrence graph: entities that appear together in same event
+    G = nx.Graph()
+    event_entity_map: dict[str, list[str]] = {}
+
+    for m in mentions:
+        eid = str(getattr(m, 'geo_event_id', '') or getattr(m, 'observation_id', ''))
+        ename = m.entity_text
+        if not eid or not ename:
+            continue
+        if eid not in event_entity_map:
+            event_entity_map[eid] = []
+        event_entity_map[eid].append(ename)
+
+    # Add nodes and edges
+    entity_counts: dict[str, int] = {}
+    for ename_list in event_entity_map.values():
+        for name in ename_list:
+            entity_counts[name] = entity_counts.get(name, 0) + 1
+
+    # Filter by min_mentions
+    valid = {k for k, v in entity_counts.items() if v >= min_mentions}
+
+    for ename_list in event_entity_map.values():
+        valid_in_event = [n for n in ename_list if n in valid]
+        for i in range(len(valid_in_event)):
+            for j in range(i+1, len(valid_in_event)):
+                a, b = valid_in_event[i], valid_in_event[j]
+                if G.has_edge(a, b):
+                    G[a][b]['weight'] += 1
+                else:
+                    G.add_edge(a, b, weight=1)
+
+    nodes = [{"id": n, "count": entity_counts.get(n, 1), "group": 1} for n in G.nodes()]
+    edges = [{"source": u, "target": v, "weight": d.get('weight', 1)}
+             for u, v, d in G.edges(data=True)]
+
+    return {"nodes": nodes[:100], "edges": edges[:300],
+            "total_entities": len(entity_counts),
+            "filtered_entities": len(valid),
+            "hours": hours}
+
+
+# ── Briefing Verification (Feature 6) ──────────────────────────────────────
+
+@app.post("/dashboard/briefing/verify")
+async def verify_briefing(
+    body: dict,
+    auth=Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Run a second LLM pass to verify claims in a briefing and assign confidence scores."""
+    import re as _re_html
+    briefing_text = body.get("briefing", "")
+    if not briefing_text:
+        raise HTTPException(status_code=400, detail="No briefing text provided")
+    # Sanitize input: strip HTML/script tags before processing
+    briefing_text = _re_html.sub(r'<[^>]+>', '', briefing_text).strip()
+
+    # Get recent events as context for verification
+    cutoff = datetime.now(UTC) - timedelta(hours=48)
+    rows = session.scalars(
+        select(GeoEventORM)
+        .where(GeoEventORM.event_time >= cutoff)
+        .order_by(GeoEventORM.magnitude.desc().nullslast())
+        .limit(30)
+    ).all()
+    context = "\n".join([f"- [{r.layer}] {r.title}" for r in rows])
+
+    verify_prompt = f"""You are an intelligence analyst verifying a situation briefing for accuracy and bias.
+
+BRIEFING TO VERIFY:
+{briefing_text[:2000]}
+
+RECENT DATA SIGNALS (ground truth):
+{context}
+
+For the briefing above, provide a verification assessment in this EXACT JSON format:
+{{
+  "overall_confidence": 0.0-1.0,
+  "bias_assessment": "brief description of any detected bias",
+  "corroborated_claims": ["list of claims confirmed by multiple sources"],
+  "uncertain_claims": ["list of claims with limited/single source"],
+  "disputed_claims": ["list of claims contradicted by available data"],
+  "missing_context": ["important context the briefing omits"],
+  "verdict": "RELIABLE|MOSTLY_RELIABLE|MIXED|UNRELIABLE"
+}}
+
+Respond ONLY with valid JSON."""
+
+    try:
+        import re as _re
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            resp = await client.post(
+                "http://localhost:11434/api/generate",
+                json={"model": "qwen2.5:14b", "prompt": verify_prompt,
+                      "stream": False, "options": {"temperature": 0.2}},
+            )
+        raw = resp.json().get('response', '{}')
+        json_match = _re.search(r'\{.*\}', raw, _re.DOTALL)
+        verification = json.loads(json_match.group()) if json_match else {}
+    except Exception as e:
+        verification = {"error": str(e), "verdict": "VERIFICATION_FAILED"}
+
+    return {"verification": verification, "verified_at": datetime.now(UTC).isoformat()}
+
+
+# ── OSINT Research (Feature 10) ─────────────────────────────────────────────
+
+@app.post("/dashboard/research")
+def trigger_research(
+    body: dict,
+    auth=Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Trigger automated OSINT research for a developing situation."""
+    from sts_monitor.osint_research import run_research_plan
+    situation_title = body.get("title", "Unknown situation")
+    situation_summary = body.get("summary", "")
+    lat = float(body.get("lat", 0))
+    lon = float(body.get("lon", 0))
+
+    result = run_research_plan(situation_title, situation_summary, lat, lon)
+
+    # Store research in SituationORM if situation_id provided
+    sit_id = body.get("situation_id")
+    if sit_id:
+        sit = session.get(SituationORM, int(sit_id))
+        if sit:
+            sit.research_json = json.dumps(result)
+            session.commit()
+
+    return result
+
+
+# ── Predictive Scoring (Feature 13) ─────────────────────────────────────────
+
+@app.get("/dashboard/predict")
+def predict_top_events(
+    hours: int = 24,
+    top_n: int = 10,
+    auth=Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Return top N most important events by predicted importance score."""
+    from sts_monitor.predictive import batch_score_events
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+    rows = session.scalars(
+        select(GeoEventORM)
+        .where(GeoEventORM.event_time >= cutoff)
+        .order_by(GeoEventORM.event_time.desc())
+        .limit(500)
+    ).all()
+
+    events = []
+    for r in rows:
+        events.append({
+            "id": r.id,
+            "title": r.title,
+            "layer": r.layer,
+            "magnitude": r.magnitude,
+            "latitude": r.latitude,
+            "longitude": r.longitude,
+            "event_time": r.event_time.isoformat(),
+        })
+
+    scored = batch_score_events(events)
+    top = sorted(scored, key=lambda e: e.get('predicted_importance', 0), reverse=True)[:top_n]
+    return {"top_events": top, "total_scored": len(scored), "hours": hours}
+
+
+# ── Timeline/Historical Map (Feature 7) ─────────────────────────────────────
+
+@app.get("/dashboard/historical")
+def historical_map(
+    before: str = "",   # ISO timestamp — return events BEFORE this time
+    hours: float = 6.0,  # window size in hours
+    layers: str = "",
+    zoom: int = 3,
+    bbox: str = "",
+    auth=Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
+    """Return map events for a historical time window (for timeline scrubber)."""
+    if before:
+        try:
+            end_time = datetime.fromisoformat(before.replace('Z', '+00:00'))
+        except Exception:
+            end_time = datetime.now(UTC)
+    else:
+        end_time = datetime.now(UTC)
+
+    start_time = end_time - timedelta(hours=hours)
+    q = select(GeoEventORM).where(
+        GeoEventORM.event_time >= start_time,
+        GeoEventORM.event_time <= end_time,
+    )
+    if layers:
+        layer_list = [l.strip() for l in layers.split(",") if l.strip()]
+        if layer_list:
+            q = q.where(GeoEventORM.layer.in_(layer_list))
+
+    if bbox:
+        try:
+            w, s, e, n = [float(x) for x in bbox.split(",")]
+            q = q.where(GeoEventORM.latitude.between(s, n))
+            q = q.where(GeoEventORM.longitude.between(w, e))
+        except Exception:
+            pass
+
+    q = q.order_by(GeoEventORM.event_time.desc()).limit(2000)
+    rows = session.scalars(q).all()
+
+    features = []
+    for r in rows:
+        props = json.loads(r.properties_json or '{}')
+        props.update({"layer": r.layer, "title": r.title, "magnitude": r.magnitude,
+                      "event_time": r.event_time.isoformat(), "source_id": r.source_id})
+        features.append({"type": "Feature",
+                         "geometry": {"type": "Point", "coordinates": [r.longitude, r.latitude]},
+                         "properties": props})
+
+    return {"type": "FeatureCollection", "features": features,
+            "window_start": start_time.isoformat(), "window_end": end_time.isoformat(),
+            "count": len(features)}
