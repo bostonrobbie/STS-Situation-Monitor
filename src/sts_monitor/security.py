@@ -1,23 +1,11 @@
 from __future__ import annotations
 
-from secrets import compare_digest
-
-from fastapi import Header, HTTPException
-
-from sts_monitor.config import settings
-
-
-def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
-    if not settings.enforce_auth:
-        return
-    if not x_api_key or not compare_digest(x_api_key, settings.auth_api_key):
-        raise HTTPException(status_code=401, detail="Unauthorized")
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import hashlib
 from secrets import compare_digest
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -38,19 +26,22 @@ def hash_api_key(value: str) -> str:
 
 def require_api_key(
     x_api_key: str | None = Header(default=None),
+    key: str | None = Query(default=None),
     session: Session = Depends(get_session),
 ) -> AuthContext:
     if not settings.enforce_auth:
         return AuthContext(label="anonymous", role="admin")
 
-    if not x_api_key:
+    # Accept key from header OR query param (needed for browser EventSource)
+    api_key = x_api_key or key
+    if not api_key:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     # Legacy static key remains valid.
-    if compare_digest(x_api_key, settings.auth_api_key):
+    if compare_digest(api_key, settings.auth_api_key):
         return AuthContext(label="root-static", role="admin")
 
-    key_hash = hash_api_key(x_api_key)
+    key_hash = hash_api_key(api_key)
     row = session.scalars(select(APIKeyORM).where(APIKeyORM.key_hash == key_hash).where(APIKeyORM.active.is_(True))).first()
     if not row:
         raise HTTPException(status_code=401, detail="Unauthorized")
