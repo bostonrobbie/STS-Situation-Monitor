@@ -10,19 +10,6 @@ from sts_monitor.pipeline import Observation
 
 
 class RSSConnector:
-    """Collects observations from RSS/Atom feeds."""
-
-    name = "rss"
-
-    def __init__(self, feed_urls: list[str], per_feed_limit: int = 10) -> None:
-        self.feed_urls = feed_urls
-        self.per_feed_limit = per_feed_limit
-
-    def collect(self, query: str | None = None) -> ConnectorResult:
-        observations: list[Observation] = []
-
-        for url in self.feed_urls:
-            parsed = feedparser.parse(url)
     """Collects observations from RSS/Atom feeds with basic retry/backoff."""
 
     name = "rss"
@@ -84,9 +71,28 @@ class RSSConnector:
                     )
                 )
 
-        return ConnectorResult(connector=self.name, observations=observations)
         return ConnectorResult(
             connector=self.name,
             observations=observations,
             metadata={"failed_feeds": failed_feeds, "feed_count": len(self.feed_urls)},
         )
+
+
+def get_expanded_feed_urls() -> list[str]:
+    """Return all curated Massachusetts-focused feed URLs for auto-ingestion."""
+    from sts_monitor.collection_plan import get_curated_feeds
+
+    feeds = get_curated_feeds([
+        "boston_metro",
+        "central_ma",
+        "western_ma",
+        "north_shore_merrimack",
+        "south_shore_coast",
+        "cape_islands",
+        "massachusetts_government",
+        "massachusetts_public_safety",
+        "weather_environment",
+        "massachusetts_general",
+        "new_england_regional",
+    ])
+    return [f["url"] for f in feeds]

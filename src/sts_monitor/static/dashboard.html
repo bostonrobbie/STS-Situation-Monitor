@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>STS Intelligence Monitor</title>
+<title>STS Massachusetts Monitor</title>
 <link rel="stylesheet" href="/static/maplibre-gl.css">
 <style>
 :root{--bg-primary:#050810;--bg-secondary:#0d1117;--bg-card:#161b27;--bg-hover:#1c2333;--border:#21293a;--border-bright:#2d3f58;--text-primary:#e2e8f0;--text-secondary:#64748b;--text-dim:#3d4f66;--accent-blue:#3b82f6;--accent-green:#22c55e;--accent-red:#ef4444;--accent-amber:#f59e0b;--accent-purple:#a855f7;--accent-cyan:#06b6d4;}
@@ -183,7 +183,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,monospace;background:v
 <body>
 
 <div class="header">
-  <div class="logo"><span>STS</span> INTEL</div>
+  <div class="logo"><span>STS</span> MASSACHUSETTS</div>
   <div class="sep"></div>
   <div class="hmeta">
     <span id="sse-status"><span class="sdot live"></span> Live</span>
@@ -197,11 +197,9 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,monospace;background:v
 </div>
 
 <div class="vnav">
-  <button class="vbtn active" onclick="setView('world')" id="vbtn-world">&#127757; WORLD</button>
-  <button class="vbtn" onclick="setView('war')" id="vbtn-war">&#9876; WAR ZONES</button>
-  <button class="vbtn" onclick="setView('aviation')" id="vbtn-aviation">&#9992; AVIATION</button>
+  <button class="vbtn active" onclick="setView('world')" id="vbtn-world">&#127968; MASSACHUSETTS</button>
+  <button class="vbtn" onclick="setView('local')" id="vbtn-local">&#128205; MY AREA</button>
   <button class="vbtn" onclick="setView('cameras')" id="vbtn-cameras">&#128249; CAMERAS</button>
-  <button class="vbtn" onclick="setView('local')" id="vbtn-local">&#127968; LOCAL</button>
   <div class="vsep"></div>
   <button class="vbtn" onclick="setView('briefing')" id="vbtn-briefing">&#128203; BRIEFING</button>
 </div>
@@ -244,8 +242,8 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,monospace;background:v
     </div>
     <!-- WAR view left panel -->
     <div id="lp-war" style="display:none">
-      <div class="psec"><div class="ptitle">Active Conflict Zones</div><div class="th-grid" id="theater-grid"></div></div>
-      <div class="psec"><div class="ptitle">War Layers</div><div id="war-layers"></div></div>
+      <div class="psec"><div class="ptitle">Massachusetts Regions</div><div class="th-grid" id="theater-grid"></div></div>
+      <div class="psec"><div class="ptitle">Active Layers</div><div id="war-layers"></div></div>
       <div class="psec">
         <div class="ptitle">Live Stats</div>
         <div class="sgrid">
@@ -282,7 +280,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,monospace;background:v
     <!-- CAMERAS view left panel -->
     <div id="lp-cameras" style="display:none">
       <div class="psec"><div class="ptitle">Camera Categories</div><div class="crtabs" id="cam-region-tabs"></div></div>
-      <div class="psec"><div class="ptitle">Stats</div><div class="sgrid"><div class="scard"><div class="sv green" id="s-cam-tot">--</div><div class="sl">Total Feeds</div></div><div class="scard"><div class="sv red" id="s-cam-war">--</div><div class="sl">War Zone</div></div></div></div>
+      <div class="psec"><div class="ptitle">Stats</div><div class="sgrid"><div class="scard"><div class="sv green" id="s-cam-tot">--</div><div class="sl">Total Feeds</div></div><div class="scard"><div class="sv red" id="s-cam-war">--</div><div class="sl">Local Area</div></div></div></div>
       <div class="psec"><div class="ptitle">About</div><div style="font-size:11px;color:var(--text-secondary);line-height:1.6">All feeds are YouTube live streams — always playable. Click any camera card to open the full player.</div>
         <button class="btns" style="margin-top:8px;width:100%;font-size:10px" onclick="_camerasData=null;loadCameraGrid()">&#8635; Reload Cameras</button>
       </div>
@@ -511,22 +509,22 @@ const LAYERS={
 };
 
 const THEATERS={
-  all_zones:{name:'&#127757; Global War',center:[20,25],zoom:2.5,bbox:null,layers:['conflict','military','telegram','news','political','social_media','humanitarian']},
-  ukraine:{name:'Ukraine',center:[31,49],zoom:6,bbox:[22,44,40,52],layers:['conflict','military','telegram','news','political']},
-  middle_east:{name:'Middle East',center:[36,32],zoom:5,bbox:[33,27,52,38],layers:['conflict','military','political','news','telegram','maritime']},
-  iran:{name:'Iran / Hormuz',center:[53,31],zoom:5,bbox:[44,24,64,40],layers:['conflict','military','political','maritime','aircraft','news']},
-  taiwan:{name:'Taiwan Strait',center:[121,24],zoom:6,bbox:[117,19,126,31],layers:['conflict','military','political','aircraft','maritime']},
-  korea:{name:'Korean Peninsula',center:[127,37],zoom:6,bbox:[124,33,131,43],layers:['conflict','military','political']},
-  sudan:{name:'Sudan',center:[30,15],zoom:5,bbox:[22,8,39,23],layers:['conflict','humanitarian','news']},
-  myanmar:{name:'Myanmar',center:[96,20],zoom:5,bbox:[92,15,101,28],layers:['conflict','humanitarian','news']},
+  massachusetts:{name:'Massachusetts',center:[-71.06,42.36],zoom:8,bbox:[-73.5,41.0,-69.9,42.9],layers:['earthquake','fire','weather_alert','news','disaster','camera','local_news','humanitarian']},
+  boston:{name:'Greater Boston',center:[-71.06,42.36],zoom:11,bbox:[-71.25,42.22,-70.85,42.50],layers:['earthquake','fire','weather_alert','news','disaster','camera','local_news']},
+  worcester:{name:'Central MA',center:[-71.80,42.26],zoom:10,bbox:[-72.2,42.0,-71.4,42.5],layers:['earthquake','fire','weather_alert','news','disaster','local_news']},
+  springfield:{name:'Western MA',center:[-72.59,42.10],zoom:10,bbox:[-73.4,41.9,-72.0,42.5],layers:['earthquake','fire','weather_alert','news','disaster','local_news']},
+  cape_cod:{name:'Cape Cod & Islands',center:[-70.30,41.70],zoom:10,bbox:[-70.8,41.2,-69.9,42.1],layers:['earthquake','fire','weather_alert','news','disaster','camera','local_news']},
+  north_shore:{name:'North Shore',center:[-70.88,42.52],zoom:11,bbox:[-71.2,42.4,-70.5,42.7],layers:['earthquake','fire','weather_alert','news','disaster','camera','local_news']},
+  south_shore:{name:'South Shore',center:[-70.85,42.10],zoom:11,bbox:[-71.1,41.9,-70.5,42.3],layers:['earthquake','fire','weather_alert','news','disaster','camera','local_news']},
 };
 
 // Camera data is now loaded from /dashboard/cameras API endpoint
 let _camerasData = null;
 
-let currentView='world',currentTheater=null,localRadius=500,searchQuery='';
+let currentView='world',currentTheater='massachusetts',localRadius=120,searchQuery='';
 let userLocation=null;try{userLocation=JSON.parse(localStorage.getItem('userLocation'));}catch(e){}
-let activeLayers=new Set(['earthquake','fire','weather_alert','conflict','military','news','political','humanitarian','disaster','health_alert','cyber']);
+if(!userLocation)userLocation={lat:42.36,lon:-71.06,name:'Massachusetts'};
+let activeLayers=new Set(['earthquake','fire','weather_alert','news','humanitarian','disaster','camera','local_news']);
 let map,geoJsonData={type:'FeatureCollection',features:[]};
 let heatOn=true,currentCamReg='traffic_cities';
 let currentRpFilter='all',localScope='city';
@@ -541,7 +539,7 @@ function buildColorExpr(){const e=['match',['get','layer']];for(const[l,c]of Obj
 function buildSizeExpr(){return['interpolate',['linear'],['zoom'],2,5,6,8,10,12,14,16];}
 
 function initMap(){
-  map=new maplibregl.Map({container:'map',style:'/static/map-style.json',center:[20,25],zoom:2.5,attributionControl:false});
+  map=new maplibregl.Map({container:'map',style:'/static/map-style.json',center:[-71.06,42.36],zoom:8,attributionControl:false});
   map.addControl(new maplibregl.NavigationControl({showCompass:true}),'bottom-right');
   map.on('load',()=>{
     map.addSource('events',{type:'geojson',data:geoJsonData});
@@ -694,9 +692,8 @@ function setView(v){
     setRpFilter('all');
     updateRpContext();
   }
-  if(v==='world'){activeLayers=new Set(['earthquake','fire','weather_alert','conflict','military','news','political','humanitarian','disaster','health_alert','cyber']);map?.flyTo({center:[20,25],zoom:2.5});loadDashboardLive();loadTimeline();loadDiscoveredTopics();}
-  else if(v==='war'){activeLayers=new Set(['conflict','military','telegram','news','political','social_media','humanitarian']);renderWarPanel();if(!currentTheater)selectTheater('all_zones');}
-  else if(v==='aviation'){activeLayers=new Set(['aircraft','aircraft_military','aircraft_emergency']);map?.flyTo({center:[0,30],zoom:2});loadMapData();startFlightTracking();}
+  if(v==='world'){activeLayers=new Set(['earthquake','fire','weather_alert','news','humanitarian','disaster','camera','local_news']);map?.flyTo({center:[-71.06,42.36],zoom:8,duration:1500});loadDashboardLive();loadTimeline();loadDiscoveredTopics();}
+  else if(v==='war'){activeLayers=new Set(['earthquake','fire','weather_alert','news','disaster','camera','local_news']);renderWarPanel();if(!currentTheater)selectTheater('massachusetts');}
   else if(v==='cameras'){setRpFilter('cams');loadCameraGrid();loadMapData();}
   else if(v==='local'){activeLayers=new Set(['earthquake','fire','weather_alert','news','humanitarian','disaster','camera','local_news']);renderLocalPanel();if(userLocation)flyToLocal();else loadMapData();}
 }
@@ -950,7 +947,7 @@ async function setLocalLoc(){
   }catch(e){console.error('Geocode error',e);}
 }
 function detectGPS(){if(!navigator.geolocation)return;navigator.geolocation.getCurrentPosition(async p=>{userLocation={lat:p.coords.latitude,lon:p.coords.longitude,name:'GPS Location'};localStorage.setItem('userLocation',JSON.stringify(userLocation));await renderLocalPanel();flyToLocal();});}
-function clearLoc(){userLocation=null;localStorage.removeItem('userLocation');const freshEl=document.getElementById('local-fresh-badge');if(freshEl)freshEl.textContent='';renderLocalPanel();map?.flyTo({center:[20,25],zoom:2.5});loadMapData();}
+function clearLoc(){userLocation={lat:42.36,lon:-71.06,name:'Massachusetts'};localStorage.removeItem('userLocation');const freshEl=document.getElementById('local-fresh-badge');if(freshEl)freshEl.textContent='';renderLocalPanel();map?.flyTo({center:[-71.06,42.36],zoom:8});loadMapData();}
 function setRadius(km,btn){localRadius=km;document.querySelectorAll('#radius-btns button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');if(userLocation){flyToLocal();loadLocalIntelligence();}}
 function flyToLocal(){if(!userLocation||!map)return;const z={25:11,100:9,250:8,500:7};map.flyTo({center:[userLocation.lon,userLocation.lat],zoom:z[localRadius]||7,duration:1500});}
 

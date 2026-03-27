@@ -394,6 +394,28 @@ class LocationSubscriptionORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
 
 
+class RegionProfileORM(Base):
+    """App-wide region profile that auto-applies to connectors when no explicit region is provided."""
+    __tablename__ = "region_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    state_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    country_code: Mapped[str] = mapped_column(String(3), default="USA")
+    country_name: Mapped[str] = mapped_column(String(100), default="United States")
+    bbox_lat_min: Mapped[float] = mapped_column(Float, nullable=False)
+    bbox_lon_min: Mapped[float] = mapped_column(Float, nullable=False)
+    bbox_lat_max: Mapped[float] = mapped_column(Float, nullable=False)
+    bbox_lon_max: Mapped[float] = mapped_column(Float, nullable=False)
+    center_lat: Mapped[float] = mapped_column(Float, nullable=False)
+    center_lon: Mapped[float] = mapped_column(Float, nullable=False)
+    radius_km: Mapped[float] = mapped_column(Float, default=120.0)
+    map_zoom: Mapped[float] = mapped_column(Float, default=8.0)
+    is_active: Mapped[bool] = mapped_column(default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+
 class SituationORM(Base):
     """Correlated situation — multiple sources reporting same area/event cluster."""
     __tablename__ = "situations"

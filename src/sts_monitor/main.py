@@ -24,17 +24,16 @@ from sqlalchemy.orm import Session
 from sts_monitor.config import settings
 from sts_monitor.discovery import build_discovery_summary
 from sts_monitor.connectors import (
-    RSSConnector, RedditConnector, GDELTConnector, USGSEarthquakeConnector,
-    NASAFIRMSConnector, ACLEDConnector, NWSAlertConnector, FEMADisasterConnector,
-    ReliefWebConnector, OpenSkyConnector, WebcamConnector,
-    WHOAlertsConnector, CISAKEVConnector, MaritimeConnector,
-    TwitterOSINTConnector, TelegramOSINTConnector,
+    RSSConnector, RedditConnector, USGSEarthquakeConnector,
+    NASAFIRMSConnector, NWSAlertConnector, FEMADisasterConnector,
+    WebcamConnector,
 )
 from sts_monitor.connectors.webcams import list_camera_regions, get_cameras_near, CURATED_CAMERAS
 from sts_monitor.database import Base, engine, get_session
 from sts_monitor.jobs import create_schedule, enqueue_job, process_job_batch, process_next_job, requeue_dead_letter, tick_schedules
 from sts_monitor.llm import LocalLLMClient
-from sts_monitor.models import APIKeyORM, AlertEventORM, AlertRuleORM, AuditLogORM, ClaimEvidenceORM, ClaimORM, CollectionPlanORM, ConvergenceZoneORM, DashboardConfigORM, DiscoveredTopicORM, EntityMentionORM, FeedbackORM, GeoEventORM, IngestionRunORM, InvestigationORM, JobORM, JobScheduleORM, ObservationORM, ReportORM, ResearchSourceORM, SearchProfileORM, StoryORM, StoryObservationORM
+from sts_monitor.models import APIKeyORM, AlertEventORM, AlertRuleORM, AuditLogORM, ClaimEvidenceORM, ClaimORM, CollectionPlanORM, ConvergenceZoneORM, DashboardConfigORM, DiscoveredTopicORM, EntityMentionORM, FeedbackORM, GeoEventORM, IngestionRunORM, InvestigationORM, JobORM, JobScheduleORM, ObservationORM, RegionProfileORM, ReportORM, ResearchSourceORM, SearchProfileORM, StoryORM, StoryObservationORM
+from sts_monitor.region import get_active_region, region_defaults_for_connector, MASSACHUSETTS_DEFAULTS
 from sts_monitor.online_tools import parse_csv_env, send_alert_webhook
 from sts_monitor.pipeline import Observation, SignalPipeline
 from sts_monitor.search import apply_context_boosts, build_query_plan, normalize_datetime, score_text, top_terms
@@ -76,6 +75,22 @@ class Investigation(BaseModel):
     created_at: datetime
 
 
+class RegionProfileRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    display_name: str = Field(min_length=2, max_length=200)
+    state_code: str | None = Field(default=None, max_length=2)
+    country_code: str = Field(default="USA", max_length=3)
+    country_name: str = Field(default="United States", max_length=100)
+    bbox_lat_min: float
+    bbox_lon_min: float
+    bbox_lat_max: float
+    bbox_lon_max: float
+    center_lat: float
+    center_lon: float
+    radius_km: float = 120.0
+    map_zoom: float = 8.0
+
+
 class RSSIngestRequest(BaseModel):
     feed_urls: list[str] = Field(min_length=1)
     query: str | None = None
@@ -100,15 +115,6 @@ class TrendingResearchRequest(BaseModel):
     per_topic_limit: int = Field(default=5, ge=1, le=20)
 
 
-class GDELTIngestRequest(BaseModel):
-    query: str | None = None
-    timespan: str = Field(default="3h", pattern=r"^\d+[hd]$")
-    max_records: int = Field(default=75, ge=1, le=250)
-    mode: str = Field(default="ArtList", pattern="^(ArtList|TimelineVol|TimelineSourceCountry)$")
-    source_country: str | None = None
-    source_lang: str | None = None
-
-
 class USGSIngestRequest(BaseModel):
     query: str | None = None
     min_magnitude: float = Field(default=4.0, ge=0.0, le=10.0)
@@ -125,15 +131,6 @@ class NASAFIRMSIngestRequest(BaseModel):
     min_confidence: str = Field(default="nominal", pattern="^(low|nominal|high)$")
 
 
-class ACLEDIngestRequest(BaseModel):
-    query: str | None = None
-    lookback_days: int = Field(default=7, ge=1, le=365)
-    limit: int = Field(default=100, ge=1, le=5000)
-    country: str | None = None
-    region: int | None = None
-    event_type: str | None = None
-
-
 class NWSIngestRequest(BaseModel):
     query: str | None = None
     severity_filter: str = Field(default="Extreme,Severe")
@@ -148,23 +145,6 @@ class FEMAIngestRequest(BaseModel):
     limit: int = Field(default=100, ge=1, le=1000)
     state: str | None = Field(default=None, min_length=2, max_length=2)
     declaration_type: str | None = Field(default=None, pattern="^(DR|EM|FM|FS)$")
-
-
-class ReliefWebIngestRequest(BaseModel):
-    query: str | None = None
-    lookback_days: int = Field(default=7, ge=1, le=365)
-    limit: int = Field(default=50, ge=1, le=500)
-    country: str | None = None
-    disaster_type: str | None = None
-    content_format: str | None = None
-
-
-class OpenSkyIngestRequest(BaseModel):
-    query: str | None = None
-    bbox_lamin: float | None = None
-    bbox_lomin: float | None = None
-    bbox_lamax: float | None = None
-    bbox_lomax: float | None = None
 
 
 class WebcamIngestRequest(BaseModel):
@@ -327,6 +307,19 @@ class RelatedInvestigationsRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    # Seed default region profile if none exists
+    try:
+        from sts_monitor.database import SessionLocal as _RegionSessionLocal
+        _rsession = _RegionSessionLocal()
+        try:
+            _existing = _rsession.execute(select(RegionProfileORM).limit(1)).scalar_one_or_none()
+            if _existing is None:
+                _rsession.add(RegionProfileORM(**MASSACHUSETTS_DEFAULTS))
+                _rsession.commit()
+        finally:
+            _rsession.close()
+    except Exception:
+        pass
     # Clean up simulated data on startup
     try:
         from sqlalchemy import delete as _startup_delete
@@ -397,15 +390,24 @@ def serve_dashboard():
 def _build_report_text(topic: str, result_summary: str, confidence: float, disputed_claims: list[str]) -> str:
     disputed_line = "\n".join(f"- {item}" for item in disputed_claims[:10]) or "- none"
     return (
-        f"You are an OSINT analyst. Analyze the following situation and respond ONLY with valid JSON, no commentary.\n\n"
+        "You are a Massachusetts local intelligence analyst. "
+        "Analyze the following situation with focus on local impact to Massachusetts communities, "
+        "state and municipal response, infrastructure (MBTA, roads, utilities), public safety, "
+        "and actionable next steps for residents and local officials. "
+        "Respond ONLY with valid JSON, no commentary.\n\n"
         f"Topic: {topic}\n"
         f"Pipeline summary: {result_summary}\n"
         f"Confidence score: {confidence:.2f}\n"
         f"Disputed claim clusters:\n{disputed_line}\n\n"
         "Respond with exactly this JSON structure:\n"
-        '{"topic":"<topic>","overall_assessment":"<2-3 sentence assessment>","overall_confidence":<0.0-1.0>,'
+        '{"topic":"<topic>","overall_assessment":"<2-3 sentence assessment focused on MA impact>",'
+        '"overall_confidence":<0.0-1.0>,'
         '"key_claims":[{"claim":"<claim text>","status":"supported","evidence":["<source>"]}],'
-        '"disputed_claims":["<claim>"],"gaps":["<info gap>"],"next_actions":["<action>"]}'
+        '"disputed_claims":["<claim>"],'
+        '"local_impact":["<specific impact to MA communities>"],'
+        '"affected_areas":["<MA cities/towns/regions affected>"],'
+        '"gaps":["<info gap>"],'
+        '"next_actions":["<actionable step for local officials or residents>"]}'
     )
 
 
@@ -1394,29 +1396,6 @@ def _ingest_with_geo_connector(
     }
 
 
-# ── GDELT Connector Endpoint ──────────────────────────────────────────
-
-
-@app.post("/investigations/{investigation_id}/ingest/gdelt")
-def ingest_gdelt(
-    investigation_id: str,
-    payload: GDELTIngestRequest,
-    auth: AuthContext = Depends(require_analyst),
-    session: Session = Depends(get_session),
-) -> dict[str, Any]:
-    connector = GDELTConnector(
-        timespan=payload.timespan,
-        max_records=payload.max_records,
-        mode=payload.mode,
-        source_country=payload.source_country,
-        source_lang=payload.source_lang,
-        timeout_s=settings.gdelt_timeout_s,
-    )
-    return _ingest_with_geo_connector(
-        session, investigation_id, "gdelt", connector, payload.query, auth,
-    )
-
-
 # ── USGS Earthquake Connector Endpoint ────────────────────────────────
 
 
@@ -1451,6 +1430,10 @@ def ingest_nasa_firms(
 ) -> dict[str, Any]:
     if not settings.nasa_firms_map_key:
         raise HTTPException(status_code=503, detail="NASA FIRMS MAP_KEY not configured")
+    if payload.country_code is None:
+        _region = get_active_region(session)
+        if _region:
+            payload.country_code = region_defaults_for_connector(_region, "nasa_firms").get("country_code")
     connector = NASAFIRMSConnector(
         map_key=settings.nasa_firms_map_key,
         sensor=settings.nasa_firms_sensor,
@@ -1464,33 +1447,6 @@ def ingest_nasa_firms(
     )
 
 
-# ── ACLED Conflict Connector Endpoint ─────────────────────────────────
-
-
-@app.post("/investigations/{investigation_id}/ingest/acled")
-def ingest_acled(
-    investigation_id: str,
-    payload: ACLEDIngestRequest,
-    auth: AuthContext = Depends(require_analyst),
-    session: Session = Depends(get_session),
-) -> dict[str, Any]:
-    if not settings.acled_api_key or not settings.acled_email:
-        raise HTTPException(status_code=503, detail="ACLED API key/email not configured")
-    connector = ACLEDConnector(
-        api_key=settings.acled_api_key,
-        email=settings.acled_email,
-        lookback_days=payload.lookback_days,
-        limit=payload.limit,
-        country=payload.country,
-        region=payload.region,
-        event_type=payload.event_type,
-        timeout_s=settings.acled_timeout_s,
-    )
-    return _ingest_with_geo_connector(
-        session, investigation_id, "acled", connector, payload.query, auth,
-    )
-
-
 # ── NWS Weather Alerts Connector Endpoint ─────────────────────────────
 
 
@@ -1501,6 +1457,10 @@ def ingest_nws(
     auth: AuthContext = Depends(require_analyst),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
+    if payload.area is None:
+        _region = get_active_region(session)
+        if _region:
+            payload.area = region_defaults_for_connector(_region, "nws").get("area")
     connector = NWSAlertConnector(
         severity_filter=payload.severity_filter,
         status=payload.status,
@@ -1523,6 +1483,10 @@ def ingest_fema(
     auth: AuthContext = Depends(require_analyst),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
+    if payload.state is None:
+        _region = get_active_region(session)
+        if _region:
+            payload.state = region_defaults_for_connector(_region, "fema").get("state")
     connector = FEMADisasterConnector(
         lookback_days=payload.lookback_days,
         limit=payload.limit,
@@ -1878,13 +1842,13 @@ def get_cameras_endpoint(auth=Depends(require_api_key)):
 
 
 _ZONE_BBOXES = {
-    "israel": (29.5, 34.0, 33.5, 36.0),
-    "ukraine": (44.0, 22.0, 52.0, 40.0),
-    "iran": (25.0, 44.0, 40.0, 63.0),
-    "taiwan": (21.0, 118.0, 26.0, 123.0),
-    "korea": (35.0, 124.0, 43.0, 132.0),
-    "sudan": (8.0, 22.0, 24.0, 38.0),
-    "myanmar": (10.0, 92.0, 28.5, 101.5),
+    "massachusetts": (41.0, -73.5, 42.9, -69.9),
+    "boston": (42.22, -71.25, 42.50, -70.85),
+    "worcester": (42.0, -72.2, 42.5, -71.4),
+    "springfield": (41.9, -73.4, 42.5, -72.0),
+    "cape_cod": (41.2, -70.8, 42.1, -69.9),
+    "north_shore": (42.4, -71.2, 42.7, -70.5),
+    "south_shore": (41.9, -71.1, 42.3, -70.5),
     "global": (-90.0, -180.0, 90.0, 180.0),
 }
 
@@ -2251,45 +2215,76 @@ def dashboard_live(
     }
 
 
-# ── ReliefWeb Humanitarian Connector Endpoint ──────────────────────────
+# ── Massachusetts Local Data Endpoints ────────────────────────────────
 
 
-@app.post("/investigations/{investigation_id}/ingest/reliefweb")
-def ingest_reliefweb(
+@app.post("/investigations/{investigation_id}/ingest/google-news")
+def ingest_google_news(
     investigation_id: str,
-    payload: ReliefWebIngestRequest,
     auth: AuthContext = Depends(require_analyst),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    connector = ReliefWebConnector(
-        lookback_days=payload.lookback_days,
-        limit=payload.limit,
-        country=payload.country,
-        disaster_type=payload.disaster_type,
-        content_format=payload.content_format,
-        timeout_s=settings.reliefweb_timeout_s,
-    )
+    """Ingest Massachusetts news from Google News RSS across all regions."""
+    from sts_monitor.connectors.google_news import GoogleNewsConnector, MA_REGION_QUERIES
+    connector = GoogleNewsConnector(queries=MA_REGION_QUERIES[:15], per_query_limit=5)
     return _ingest_with_geo_connector(
-        session, investigation_id, "reliefweb", connector, payload.query, auth,
+        session, investigation_id, "google_news", connector, None, auth,
     )
 
 
-# ── OpenSky Aircraft Connector Endpoint ────────────────────────────────
-
-
-@app.post("/investigations/{investigation_id}/ingest/opensky")
-def ingest_opensky(
+@app.post("/investigations/{investigation_id}/ingest/mbta")
+def ingest_mbta(
     investigation_id: str,
-    payload: OpenSkyIngestRequest,
     auth: AuthContext = Depends(require_analyst),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    bbox = None
-    if all(v is not None for v in [payload.bbox_lamin, payload.bbox_lomin, payload.bbox_lamax, payload.bbox_lomax]):
-        bbox = (payload.bbox_lamin, payload.bbox_lomin, payload.bbox_lamax, payload.bbox_lomax)
-    connector = OpenSkyConnector(bbox=bbox, timeout_s=settings.opensky_timeout_s)
+    """Ingest real-time MBTA service alerts."""
+    from sts_monitor.connectors.mbta import MBTAConnector
+    connector = MBTAConnector(severity_min=3)
     return _ingest_with_geo_connector(
-        session, investigation_id, "opensky", connector, payload.query, auth,
+        session, investigation_id, "mbta", connector, None, auth,
+    )
+
+
+@app.post("/investigations/{investigation_id}/ingest/ma-environment")
+def ingest_ma_environment(
+    investigation_id: str,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Ingest MA environment data (USGS water gauges, NOAA tides)."""
+    from sts_monitor.connectors.ma_environment import MAEnvironmentConnector
+    connector = MAEnvironmentConnector()
+    return _ingest_with_geo_connector(
+        session, investigation_id, "ma_environment", connector, None, auth,
+    )
+
+
+@app.post("/investigations/{investigation_id}/ingest/ma-public-data")
+def ingest_ma_public_data(
+    investigation_id: str,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Ingest Boston 311 reports and crime data."""
+    from sts_monitor.connectors.ma_public_data import MAPublicDataConnector
+    connector = MAPublicDataConnector()
+    return _ingest_with_geo_connector(
+        session, investigation_id, "ma_public_data", connector, None, auth,
+    )
+
+
+@app.post("/investigations/{investigation_id}/ingest/power-outages")
+def ingest_power_outages(
+    investigation_id: str,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Check for power outages from Eversource and National Grid."""
+    from sts_monitor.connectors.power_outages import PowerOutageConnector
+    connector = PowerOutageConnector()
+    return _ingest_with_geo_connector(
+        session, investigation_id, "power_outages", connector, None, auth,
     )
 
 
@@ -2303,6 +2298,13 @@ def ingest_webcams(
     auth: AuthContext = Depends(require_analyst),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
+    if payload.nearby_lat is None and payload.regions is None:
+        _region = get_active_region(session)
+        if _region:
+            _rd = region_defaults_for_connector(_region, "webcams")
+            payload.nearby_lat = _rd.get("nearby_lat")
+            payload.nearby_lon = _rd.get("nearby_lon")
+            payload.nearby_radius_km = _rd.get("nearby_radius_km", payload.nearby_radius_km)
     connector = WebcamConnector(
         windy_api_key=settings.windy_api_key or None,
         regions=payload.regions,
@@ -4503,6 +4505,82 @@ def delete_subscription(sub_id: int, auth=Depends(require_api_key), session: Ses
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
     session.delete(sub)
+    session.commit()
+    return {"deleted": True}
+
+
+# ── Region Profile Management ──────────────────────────────────────────────
+
+
+@app.get("/region-profile")
+def get_region_profile(auth=Depends(require_api_key), session: Session = Depends(get_session)):
+    """Get the active region profile."""
+    region = get_active_region(session)
+    if not region:
+        raise HTTPException(status_code=404, detail="No active region profile configured")
+    return {
+        "id": region.id, "name": region.name, "display_name": region.display_name,
+        "state_code": region.state_code, "country_code": region.country_code,
+        "country_name": region.country_name,
+        "bbox": {"lat_min": region.bbox_lat_min, "lon_min": region.bbox_lon_min,
+                 "lat_max": region.bbox_lat_max, "lon_max": region.bbox_lon_max},
+        "center": {"lat": region.center_lat, "lon": region.center_lon},
+        "radius_km": region.radius_km, "map_zoom": region.map_zoom,
+        "is_active": region.is_active, "created_at": region.created_at.isoformat(),
+    }
+
+
+@app.get("/region-profiles")
+def list_region_profiles(auth=Depends(require_api_key), session: Session = Depends(get_session)):
+    """List all saved region profiles."""
+    rows = session.execute(select(RegionProfileORM).order_by(RegionProfileORM.name)).scalars().all()
+    return [
+        {"id": r.id, "name": r.name, "display_name": r.display_name,
+         "state_code": r.state_code, "is_active": r.is_active}
+        for r in rows
+    ]
+
+
+@app.put("/region-profile")
+def set_region_profile(
+    payload: RegionProfileRequest,
+    auth: AuthContext = Depends(require_analyst),
+    session: Session = Depends(get_session),
+):
+    """Set or update the active region profile. Deactivates any other active profile."""
+    # Deactivate all
+    for row in session.execute(select(RegionProfileORM).where(RegionProfileORM.is_active.is_(True))).scalars():
+        row.is_active = False
+    # Upsert by name
+    existing = session.execute(
+        select(RegionProfileORM).where(RegionProfileORM.name == payload.name)
+    ).scalar_one_or_none()
+    if existing:
+        for field in payload.model_fields:
+            setattr(existing, field, getattr(payload, field))
+        existing.is_active = True
+        session.commit()
+        return {"id": existing.id, "name": existing.name, "activated": True, "created": False}
+    new_profile = RegionProfileORM(**payload.model_dump(), is_active=True)
+    session.add(new_profile)
+    session.commit()
+    session.refresh(new_profile)
+    return {"id": new_profile.id, "name": new_profile.name, "activated": True, "created": True}
+
+
+@app.delete("/region-profile/{profile_id}")
+def delete_region_profile(
+    profile_id: int,
+    auth: AuthContext = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    """Delete a saved region profile. Cannot delete the active one."""
+    profile = session.get(RegionProfileORM, profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Region profile not found")
+    if profile.is_active:
+        raise HTTPException(status_code=409, detail="Cannot delete the active region profile. Switch to another first.")
+    session.delete(profile)
     session.commit()
     return {"deleted": True}
 

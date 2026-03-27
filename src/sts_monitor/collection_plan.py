@@ -73,54 +73,137 @@ DEFAULT_CONNECTOR_CONFIGS: dict[str, dict[str, Any]] = {
 # ── Curated RSS feed collections ────────────────────────────────────────
 
 CURATED_FEEDS: dict[str, list[dict[str, str]]] = {
-    "world_news": [
-        {"name": "Reuters World", "url": "https://feeds.reuters.com/Reuters/worldNews"},
-        {"name": "BBC World", "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},
-        {"name": "Al Jazeera", "url": "https://www.aljazeera.com/xml/rss/all.xml"},
-        {"name": "AP News", "url": "https://rsshub.app/apnews/topics/apf-topnews"},
-        {"name": "France24", "url": "https://www.france24.com/en/rss"},
-        {"name": "DW News", "url": "https://rss.dw.com/rdf/rss-en-all"},
+    # ── Greater Boston & Eastern MA ──────────────────────────────────────
+    "boston_metro": [
+        {"name": "Boston Globe", "url": "https://www.bostonglobe.com/rss/current/bigpicture"},
+        {"name": "Boston Herald", "url": "https://www.bostonherald.com/feed/"},
+        {"name": "WBUR News", "url": "https://www.wbur.org/feed/rss/news"},
+        {"name": "WCVB Boston", "url": "https://www.wcvb.com/topstories-rss"},
+        {"name": "GBH News", "url": "https://www.wgbh.org/news/feed"},
+        {"name": "Universal Hub", "url": "https://www.universalhub.com/rss.xml"},
+        {"name": "Patch Boston", "url": "https://patch.com/massachusetts/boston/rss"},
+        {"name": "Patch Cambridge", "url": "https://patch.com/massachusetts/cambridge/rss"},
+        {"name": "Patch Somerville", "url": "https://patch.com/massachusetts/somerville/rss"},
+        {"name": "Patch Brookline", "url": "https://patch.com/massachusetts/brookline/rss"},
+        {"name": "Patch Newton", "url": "https://patch.com/massachusetts/newton/rss"},
+        {"name": "Patch Quincy", "url": "https://patch.com/massachusetts/quincy/rss"},
+        {"name": "Google News Boston", "url": "https://news.google.com/rss/search?q=Boston+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
     ],
-    "conflict_security": [
-        {"name": "The War Zone", "url": "https://www.thedrive.com/the-war-zone/feed"},
-        {"name": "Defense One", "url": "https://www.defenseone.com/rss/"},
-        {"name": "Jane's Defence", "url": "https://www.janes.com/feeds/news"},
-        {"name": "IISS", "url": "https://www.iiss.org/rss"},
-        {"name": "Crisis Group", "url": "https://www.crisisgroup.org/rss.xml"},
-        {"name": "SIPRI", "url": "https://www.sipri.org/rss.xml"},
+    # ── Central Massachusetts (Worcester & surrounding) ──────────────────
+    "central_ma": [
+        {"name": "Worcester Telegram", "url": "https://www.telegram.com/rss"},
+        {"name": "MassLive", "url": "https://www.masslive.com/arc/outboundfeeds/rss/?outputType=xml"},
+        {"name": "Patch Worcester", "url": "https://patch.com/massachusetts/worcester/rss"},
+        {"name": "Patch Framingham", "url": "https://patch.com/massachusetts/framingham/rss"},
+        {"name": "Patch Marlborough", "url": "https://patch.com/massachusetts/marlborough/rss"},
+        {"name": "Patch Shrewsbury", "url": "https://patch.com/massachusetts/shrewsbury/rss"},
+        {"name": "Patch Grafton-Millbury", "url": "https://patch.com/massachusetts/grafton-millbury/rss"},
+        {"name": "Patch Holden-Rutland", "url": "https://patch.com/massachusetts/holden-rutland/rss"},
+        {"name": "Patch Leominster", "url": "https://patch.com/massachusetts/leominster/rss"},
+        {"name": "Patch Fitchburg", "url": "https://patch.com/massachusetts/fitchburg/rss"},
+        {"name": "Google News Worcester", "url": "https://news.google.com/rss/search?q=Worcester+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News Central MA", "url": "https://news.google.com/rss/search?q=%22Central+Massachusetts%22+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News MetroWest", "url": "https://news.google.com/rss/search?q=MetroWest+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
     ],
-    "humanitarian": [
-        {"name": "ReliefWeb Updates", "url": "https://reliefweb.int/updates/rss.xml"},
-        {"name": "UNHCR News", "url": "https://www.unhcr.org/rss/news.xml"},
-        {"name": "WHO Disease Outbreaks", "url": "https://www.who.int/feeds/entity/don/en/rss.xml"},
-        {"name": "ICRC News", "url": "https://www.icrc.org/en/rss"},
-        {"name": "MSF Press", "url": "https://www.msf.org/rss/all"},
+    # ── Western Massachusetts (Springfield, Pioneer Valley, Berkshires) ──
+    "western_ma": [
+        {"name": "Berkshire Eagle", "url": "https://www.berkshireeagle.com/search/?f=rss&t=article&l=50"},
+        {"name": "Patch Springfield", "url": "https://patch.com/massachusetts/springfield/rss"},
+        {"name": "Patch Northampton", "url": "https://patch.com/massachusetts/northampton/rss"},
+        {"name": "Patch Amherst", "url": "https://patch.com/massachusetts/amherst/rss"},
+        {"name": "Patch Westfield", "url": "https://patch.com/massachusetts/westfield/rss"},
+        {"name": "Patch Agawam", "url": "https://patch.com/massachusetts/agawam/rss"},
+        {"name": "Google News Springfield MA", "url": "https://news.google.com/rss/search?q=Springfield+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News Pioneer Valley", "url": "https://news.google.com/rss/search?q=%22Pioneer+Valley%22+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News Berkshires", "url": "https://news.google.com/rss/search?q=Berkshires+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News Pittsfield", "url": "https://news.google.com/rss/search?q=Pittsfield+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News Western MA", "url": "https://news.google.com/rss/search?q=%22Western+Massachusetts%22+news&hl=en-US&gl=US&ceid=US:en"},
     ],
-    "natural_disasters": [
-        {"name": "USGS Earthquakes", "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_month.atom"},
-        {"name": "NOAA Hazards", "url": "https://www.weather.gov/rss_page.php?site_name=nws"},
-        {"name": "GDACS Alerts", "url": "https://www.gdacs.org/xml/rss.xml"},
-        {"name": "Volcano Discovery", "url": "https://www.volcanodiscovery.com/rss/news.xml"},
+    # ── North Shore, Merrimack Valley, Lowell ────────────────────────────
+    "north_shore_merrimack": [
+        {"name": "Patch Salem", "url": "https://patch.com/massachusetts/salem/rss"},
+        {"name": "Patch Beverly", "url": "https://patch.com/massachusetts/beverly/rss"},
+        {"name": "Patch Gloucester", "url": "https://patch.com/massachusetts/gloucester/rss"},
+        {"name": "Patch Peabody", "url": "https://patch.com/massachusetts/peabody/rss"},
+        {"name": "Patch Lowell", "url": "https://patch.com/massachusetts/lowell/rss"},
+        {"name": "Patch Lawrence", "url": "https://patch.com/massachusetts/lawrence/rss"},
+        {"name": "Patch Haverhill", "url": "https://patch.com/massachusetts/haverhill/rss"},
+        {"name": "Patch Andover", "url": "https://patch.com/massachusetts/andover/rss"},
+        {"name": "Google News North Shore MA", "url": "https://news.google.com/rss/search?q=%22North+Shore%22+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News Merrimack Valley", "url": "https://news.google.com/rss/search?q=%22Merrimack+Valley%22+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News Lowell MA", "url": "https://news.google.com/rss/search?q=Lowell+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
     ],
+    # ── South Shore, South Coast, Fall River, New Bedford ────────────────
+    "south_shore_coast": [
+        {"name": "Patch Plymouth", "url": "https://patch.com/massachusetts/plymouth/rss"},
+        {"name": "Patch Brockton", "url": "https://patch.com/massachusetts/brockton/rss"},
+        {"name": "Patch Taunton", "url": "https://patch.com/massachusetts/taunton/rss"},
+        {"name": "Patch Marshfield", "url": "https://patch.com/massachusetts/marshfield/rss"},
+        {"name": "Patch Hingham", "url": "https://patch.com/massachusetts/hingham/rss"},
+        {"name": "Google News South Shore MA", "url": "https://news.google.com/rss/search?q=%22South+Shore%22+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News New Bedford MA", "url": "https://news.google.com/rss/search?q=%22New+Bedford%22+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News Fall River MA", "url": "https://news.google.com/rss/search?q=%22Fall+River%22+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News South Coast MA", "url": "https://news.google.com/rss/search?q=%22South+Coast%22+Massachusetts+news&hl=en-US&gl=US&ceid=US:en"},
+    ],
+    # ── Cape Cod & Islands ───────────────────────────────────────────────
+    "cape_islands": [
+        {"name": "Cape Cod Times", "url": "https://www.capecodtimes.com/rss"},
+        {"name": "Patch Barnstable-Hyannis", "url": "https://patch.com/massachusetts/barnstable-hyannis/rss"},
+        {"name": "Patch Falmouth", "url": "https://patch.com/massachusetts/falmouth/rss"},
+        {"name": "Google News Cape Cod", "url": "https://news.google.com/rss/search?q=%22Cape+Cod%22+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News Martha's Vineyard", "url": "https://news.google.com/rss/search?q=%22Martha%27s+Vineyard%22+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News Nantucket", "url": "https://news.google.com/rss/search?q=Nantucket+news&hl=en-US&gl=US&ceid=US:en"},
+    ],
+    # ── Statewide Government & Public Safety ─────────────────────────────
+    "massachusetts_government": [
+        {"name": "Mass.gov News", "url": "https://www.mass.gov/news/feed"},
+        {"name": "Boston.gov News", "url": "https://www.boston.gov/news/feed"},
+        {"name": "MA State Police", "url": "https://www.mass.gov/orgs/massachusetts-state-police/news/feed"},
+        {"name": "MEMA Alerts", "url": "https://www.mass.gov/orgs/massachusetts-emergency-management-agency/news/feed"},
+        {"name": "MassDOT", "url": "https://www.mass.gov/orgs/massachusetts-department-of-transportation/news/feed"},
+        {"name": "MA DPH", "url": "https://www.mass.gov/orgs/department-of-public-health/news/feed"},
+        {"name": "MA AG Office", "url": "https://www.mass.gov/orgs/attorney-generals-office/news/feed"},
+        {"name": "MA DEP", "url": "https://www.mass.gov/orgs/massachusetts-department-of-environmental-protection/news/feed"},
+        {"name": "MA Courts", "url": "https://www.mass.gov/orgs/trial-court/news/feed"},
+    ],
+    "massachusetts_public_safety": [
+        {"name": "Boston Fire Dept", "url": "https://www.boston.gov/departments/fire-operations/news/feed"},
+        {"name": "Boston Police News", "url": "https://bpdnews.com/feed"},
+        {"name": "MBTA Alerts", "url": "https://www.mbta.com/news/feed"},
+        {"name": "Google News MA Crime", "url": "https://news.google.com/rss/search?q=Massachusetts+crime+police+arrest&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News MA Fire", "url": "https://news.google.com/rss/search?q=Massachusetts+fire+emergency&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News MA Traffic", "url": "https://news.google.com/rss/search?q=Massachusetts+traffic+accident+crash&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News MBTA", "url": "https://news.google.com/rss/search?q=MBTA+delays+service&hl=en-US&gl=US&ceid=US:en"},
+    ],
+    # ── Weather & Environment ────────────────────────────────────────────
+    "weather_environment": [
+        {"name": "NWS Boston", "url": "https://alerts.weather.gov/cap/ma.php?x=1"},
+        {"name": "USGS NE Earthquakes", "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.atom"},
+        {"name": "Google News MA Weather", "url": "https://news.google.com/rss/search?q=Massachusetts+weather+storm+forecast&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News MA Flooding", "url": "https://news.google.com/rss/search?q=Massachusetts+flood+warning&hl=en-US&gl=US&ceid=US:en"},
+    ],
+    # ── Statewide Google News (catches everything else) ──────────────────
+    "massachusetts_general": [
+        {"name": "Google News MA Breaking", "url": "https://news.google.com/rss/search?q=Massachusetts+breaking+news&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News MA Today", "url": "https://news.google.com/rss/search?q=Massachusetts+news+today&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News MA Schools", "url": "https://news.google.com/rss/search?q=Massachusetts+schools+education&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News MA Health", "url": "https://news.google.com/rss/search?q=Massachusetts+health+hospital&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News MA Business", "url": "https://news.google.com/rss/search?q=Massachusetts+business+economy+jobs&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News MA Politics", "url": "https://news.google.com/rss/search?q=Massachusetts+governor+legislature+politics&hl=en-US&gl=US&ceid=US:en"},
+        {"name": "Google News MA Housing", "url": "https://news.google.com/rss/search?q=Massachusetts+housing+real+estate+rent&hl=en-US&gl=US&ceid=US:en"},
+    ],
+    # ── New England Regional ─────────────────────────────────────────────
+    "new_england_regional": [
+        {"name": "NECN", "url": "https://www.necn.com/feed/"},
+        {"name": "AP New England", "url": "https://rsshub.app/apnews/topics/apf-topnews"},
+        {"name": "Google News New England", "url": "https://news.google.com/rss/search?q=%22New+England%22+news&hl=en-US&gl=US&ceid=US:en"},
+    ],
+    # ── Cyber Threat (not geo-specific) ──────────────────────────────────
     "cyber_threat": [
         {"name": "Krebs on Security", "url": "https://krebsonsecurity.com/feed/"},
         {"name": "The Hacker News", "url": "https://feeds.feedburner.com/TheHackersNews"},
         {"name": "BleepingComputer", "url": "https://www.bleepingcomputer.com/feed/"},
-        {"name": "Dark Reading", "url": "https://www.darkreading.com/rss.xml"},
         {"name": "CISA Alerts", "url": "https://www.cisa.gov/uscert/ncas/alerts.xml"},
-    ],
-    "osint_analysis": [
-        {"name": "Bellingcat", "url": "https://www.bellingcat.com/feed/"},
-        {"name": "The Intercept", "url": "https://theintercept.com/feed/?rss"},
-        {"name": "Lawfare", "url": "https://www.lawfaremedia.org/rss.xml"},
-        {"name": "Foreign Policy", "url": "https://foreignpolicy.com/feed/"},
-        {"name": "War on the Rocks", "url": "https://warontherocks.com/feed/"},
-    ],
-    "government_press": [
-        {"name": "White House Briefings", "url": "https://www.whitehouse.gov/feed/"},
-        {"name": "US State Dept", "url": "https://www.state.gov/rss-feed/press-releases/feed/"},
-        {"name": "UK FCDO", "url": "https://www.gov.uk/government/organisations/foreign-commonwealth-development-office.atom"},
-        {"name": "EU External Action", "url": "https://www.eeas.europa.eu/eeas/press-material_en?f%5B0%5D=press_material_type%3Apress_release&_format=rss"},
     ],
 }
 
@@ -165,15 +248,15 @@ def build_collection_plan(
 
     requirements: list[CollectionRequirement] = []
 
-    # Always include GDELT (broad news coverage)
+    # Always include NWS for local weather alerts
     requirements.append(CollectionRequirement(
-        name=f"GDELT: {query[:60]}",
-        description=f"Monitor global news for: {investigation_topic}",
-        investigation_id="",  # Set by caller
-        connectors=["gdelt"],
+        name=f"NWS MA Alerts: {query[:60]}",
+        description="Monitor Massachusetts severe weather alerts",
+        investigation_id="",
+        connectors=["nws"],
         query=query,
-        priority=priority,
-        interval_seconds=3600,  # Hourly
+        priority=priority + 10,
+        interval_seconds=900,  # Every 15 minutes
     ))
 
     # Earthquake/seismic topics
@@ -181,62 +264,35 @@ def build_collection_plan(
     if any(kw in topic_lower for kw in earthquake_kw):
         requirements.append(CollectionRequirement(
             name=f"USGS Earthquakes: {query[:40]}",
-            description="Monitor earthquake activity",
+            description="Monitor New England earthquake activity",
             investigation_id="",
             connectors=["usgs"],
             query=query,
             priority=priority + 10,
-            interval_seconds=900,  # Every 15 minutes
-            filters={"min_magnitude": 3.0},
+            interval_seconds=900,
+            filters={"min_magnitude": 2.0},
         ))
 
     # Fire/wildfire topics
-    fire_kw = {"fire", "wildfire", "blaze", "burn", "arson", "forest fire", "bushfire"}
+    fire_kw = {"fire", "wildfire", "blaze", "burn", "arson", "forest fire"}
     if any(kw in topic_lower for kw in fire_kw):
         requirements.append(CollectionRequirement(
-            name=f"NASA FIRMS: {query[:40]}",
-            description="Monitor fire hotspots via satellite",
+            name=f"NASA FIRMS MA: {query[:40]}",
+            description="Monitor fire hotspots in Massachusetts via satellite",
             investigation_id="",
             connectors=["nasa_firms"],
             query=query,
             priority=priority + 10,
-            interval_seconds=1800,  # Every 30 minutes
-        ))
-
-    # Conflict/security topics
-    conflict_kw = {"war", "conflict", "military", "attack", "troops", "bomb", "strike",
-                   "missile", "protest", "riot", "insurgent", "militia", "terror", "coup"}
-    if any(kw in topic_lower for kw in conflict_kw):
-        requirements.append(CollectionRequirement(
-            name=f"ACLED Conflict: {query[:40]}",
-            description="Monitor conflict events",
-            investigation_id="",
-            connectors=["acled"],
-            query=query,
-            priority=priority + 10,
-            interval_seconds=7200,  # Every 2 hours
+            interval_seconds=1800,
         ))
 
     # Weather/disaster topics
-    weather_kw = {"storm", "hurricane", "tornado", "flood", "cyclone", "typhoon",
-                  "drought", "blizzard", "weather", "severe"}
+    weather_kw = {"storm", "hurricane", "tornado", "flood", "nor'easter", "noreaster",
+                  "drought", "blizzard", "weather", "severe", "snow", "ice", "heat"}
     if any(kw in topic_lower for kw in weather_kw):
         requirements.append(CollectionRequirement(
-            name=f"NWS Alerts: {query[:40]}",
-            description="Monitor severe weather alerts",
-            investigation_id="",
-            connectors=["nws"],
-            query=query,
-            priority=priority + 10,
-            interval_seconds=900,  # Every 15 minutes
-        ))
-
-    # Disaster/FEMA topics
-    disaster_kw = {"disaster", "fema", "emergency", "declaration", "evacuation", "relief"}
-    if any(kw in topic_lower for kw in disaster_kw):
-        requirements.append(CollectionRequirement(
-            name=f"FEMA: {query[:40]}",
-            description="Monitor disaster declarations",
+            name=f"FEMA MA: {query[:40]}",
+            description="Monitor Massachusetts disaster declarations",
             investigation_id="",
             connectors=["fema"],
             query=query,
@@ -244,18 +300,17 @@ def build_collection_plan(
             interval_seconds=3600,
         ))
 
-    # Determine relevant RSS feed categories
-    rss_categories: list[str] = ["world_news"]  # Always include
-    if any(kw in topic_lower for kw in conflict_kw):
-        rss_categories.append("conflict_security")
-    if any(kw in topic_lower for kw in {"humanitarian", "refugee", "aid", "relief", "crisis", "displaced"}):
-        rss_categories.append("humanitarian")
-    if any(kw in topic_lower for kw in earthquake_kw | fire_kw | weather_kw | disaster_kw):
-        rss_categories.append("natural_disasters")
-    if any(kw in topic_lower for kw in {"cyber", "hack", "breach", "malware", "ransomware", "vulnerability"}):
+    # Determine relevant RSS feed categories — always include MA core
+    rss_categories: list[str] = ["massachusetts_news", "massachusetts_government"]
+    if any(kw in topic_lower for kw in {"police", "crime", "fire", "safety", "accident",
+                                         "shooting", "arrest", "traffic", "mbta", "transit"}):
+        rss_categories.append("massachusetts_public_safety")
+    if any(kw in topic_lower for kw in earthquake_kw | fire_kw | weather_kw |
+           {"disaster", "fema", "emergency", "flood", "storm"}):
+        rss_categories.append("weather_environment")
+    if any(kw in topic_lower for kw in {"cyber", "hack", "breach", "malware", "ransomware"}):
         rss_categories.append("cyber_threat")
-    if any(kw in topic_lower for kw in {"osint", "investigation", "intelligence", "disinformation", "propaganda"}):
-        rss_categories.append("osint_analysis")
+    rss_categories.append("new_england_regional")
 
     feeds = get_curated_feeds(list(set(rss_categories)))
     if feeds:
@@ -275,20 +330,22 @@ def build_collection_plan(
 
 # ── LLM-assisted discovery prompt ───────────────────────────────────────
 
-LLM_DISCOVERY_PROMPT = """You are an OSINT analyst. Given these recent observations,
-identify the top emerging stories that deserve investigation.
+LLM_DISCOVERY_PROMPT = """You are a Massachusetts local intelligence analyst. Given these recent observations from the greater Massachusetts area, identify the top emerging local stories that deserve investigation.
+
+Focus on: local public safety, weather impacts, infrastructure (MBTA, roads, utilities), municipal government actions, environmental concerns, public health, and community events that affect daily life in Massachusetts.
 
 For each story, provide:
 1. A concise headline (under 100 chars)
-2. Why it matters (1-2 sentences)
+2. Why it matters to Massachusetts residents (1-2 sentences)
 3. Suggested search terms
-4. Which data sources to monitor (from: gdelt, usgs, nasa_firms, acled, nws, fema, rss, reddit)
+4. Which data sources to monitor (from: nws, fema, usgs, nasa_firms, rss, reddit, webcams)
 5. Priority (1-100, where 100 is most urgent)
+6. Affected areas within Massachusetts (cities/towns/regions)
 
 Recent observations:
 {observations}
 
-Return a JSON array of objects with keys: headline, why_it_matters, search_terms, data_sources, priority
+Return a JSON array of objects with keys: headline, why_it_matters, search_terms, data_sources, priority, affected_areas
 Return ONLY the JSON array."""
 
 

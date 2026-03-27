@@ -246,11 +246,14 @@ def ingest_round():
 
     # ── Core geo connectors (every 15 min) ────────────────────────────────
     connectors = [
-        ("/ingest/usgs",  {"min_magnitude": 2.5, "lookback_hours": 48, "max_events": 200}),
-        ("/ingest/nws",   {}),
-        ("/ingest/gdelt", {"query": "conflict disaster earthquake flood humanitarian",
-                           "max_records": 75, "timespan": "24h"}),
-        ("/ingest/fema",  {}),
+        ("/ingest/nws",            {}),
+        ("/ingest/fema",           {}),
+        ("/ingest/usgs",           {"min_magnitude": 2.0, "lookback_hours": 48, "max_events": 100}),
+        ("/ingest/google-news",    {}),
+        ("/ingest/mbta",           {}),
+        ("/ingest/ma-public-data", {}),
+        ("/ingest/power-outages",  {}),
+        ("/ingest/ma-environment", {}),
     ]
 
     total_geo = 0
@@ -269,60 +272,41 @@ def ingest_round():
         except Exception as e:
             log.error(f"  {path}: {e}")
 
-    # ── Geo news layers (every 15 min) ────────────────────────────────────
-    geo_news_topics = [
-        ("/ingest/geo-news", {"layer": "conflict",  "timespan": "24h", "max_geo_events": 80}),
-        ("/ingest/geo-news", {"layer": "military",  "timespan": "24h", "max_geo_events": 60}),
-        ("/ingest/geo-news", {"layer": "news",      "timespan": "12h", "max_geo_events": 80}),
-        ("/ingest/geo-news", {"layer": "political", "timespan": "24h", "max_geo_events": 60}),
-        ("/ingest/geo-news", {"layer": "conspiracy","timespan": "24h", "max_geo_events": 40, "include_reddit": True}),
-    ]
-    for path, body in geo_news_topics:
+    # ── Reddit MA subreddits (every 30 min = every other cycle) ──────────
+    if _cycle_count % 2 == 0:
+        ma_subreddits = ["boston", "massachusetts", "worcesterma", "springfieldma",
+                         "capecod", "westernmass", "northshore", "southshorema"]
         try:
-            r = httpx.post(f"{BASE}/investigations/{inv_id}{path}",
-                           headers=HEADERS, json=body, timeout=60)
+            r = httpx.post(f"{BASE}/investigations/{inv_id}/ingest/reddit",
+                           headers=HEADERS,
+                           json={"subreddits": ma_subreddits, "per_subreddit_limit": 10, "sort": "new"},
+                           timeout=90)
             if r.status_code == 200:
                 d = r.json()
-                geo = d.get("geo_events_count", 0)
-                log.info(f"  {path} layer={body['layer']}: geo={geo}")
+                log.info(f"  reddit MA: ingested={d.get('ingested_count', 0)}")
             else:
-                log.warning(f"  {path}: HTTP {r.status_code}")
+                log.warning(f"  reddit MA: HTTP {r.status_code}")
         except Exception as e:
-            log.error(f"  {path}: {e}")
-
-    # ── New intelligence connectors (every 15 min) ────────────────────────
-    new_connectors = [
-        ("/ingest/who-alerts",     {"query": None}),
-        ("/ingest/cisa-kev",       {"lookback_days": 7}),
-        ("/ingest/twitter-osint",  {}),
-        ("/ingest/telegram-osint", {}),
-        ("/ingest/maritime",       {}),
-    ]
-    for path, body in new_connectors:
-        try:
-            r = httpx.post(f"{BASE}/investigations/{inv_id}{path}",
-                           headers=HEADERS, json=body, timeout=60)
-            if r.status_code == 200:
-                d = r.json()
-                geo = d.get("geo_events_count", 0)
-                ing = d.get("ingested_count", 0)
-                log.info(f"  {path}: ingested={ing} geo={geo}")
-            else:
-                log.warning(f"  {path}: HTTP {r.status_code} — {r.text[:200]}")
-        except Exception as e:
-            log.error(f"  {path}: {e}")
+            log.error(f"  reddit MA: {e}")
 
     # ── Local news for major US cities (every 30 min = every other cycle) ─
     if _cycle_count % 2 == 0:
         major_cities = [
             ("Boston", "Massachusetts", 42.3601, -71.0589),
-            ("New York", "New York", 40.7128, -74.0060),
-            ("Los Angeles", "California", 34.0522, -118.2437),
-            ("Chicago", "Illinois", 41.8781, -87.6298),
-            ("Houston", "Texas", 29.7604, -95.3698),
-            ("Miami", "Florida", 25.7617, -80.1918),
-            ("Seattle", "Washington", 47.6062, -122.3321),
-            ("Atlanta", "Georgia", 33.7490, -84.3880),
+            ("Worcester", "Massachusetts", 42.2626, -71.8023),
+            ("Springfield", "Massachusetts", 42.1015, -72.5898),
+            ("Cambridge", "Massachusetts", 42.3736, -71.1097),
+            ("Lowell", "Massachusetts", 42.6334, -71.3162),
+            ("New Bedford", "Massachusetts", 41.6362, -70.9342),
+            ("Fall River", "Massachusetts", 41.7015, -71.1550),
+            ("Lynn", "Massachusetts", 42.4668, -70.9495),
+            ("Lawrence", "Massachusetts", 42.7070, -71.1631),
+            ("Brockton", "Massachusetts", 42.0834, -71.0184),
+            ("Quincy", "Massachusetts", 42.2529, -71.0023),
+            ("Framingham", "Massachusetts", 42.2793, -71.4162),
+            ("Plymouth", "Massachusetts", 41.9584, -70.6673),
+            ("Pittsfield", "Massachusetts", 42.4501, -73.2453),
+            ("Cape Cod", "Massachusetts", 41.6688, -70.2962),
         ]
         try:
             from sts_monitor.connectors.local_discovery import fetch_local_news
