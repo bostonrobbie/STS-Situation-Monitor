@@ -905,7 +905,8 @@ def ingest_rss(
         timeout_s=settings.rss_timeout_s,
         max_retries=settings.rss_max_retries,
     )
-    result = connector.collect(query=payload.query or investigation.seed_query or investigation.topic)
+    effective_query = payload.query or investigation.seed_query or None
+    result = connector.collect(query=effective_query)
 
     for item in result.observations:
         session.add(
@@ -1051,7 +1052,8 @@ def ingest_reddit(
         timeout_s=settings.reddit_timeout_s,
         user_agent=settings.reddit_user_agent,
     )
-    result = connector.collect(query=payload.query or investigation.seed_query or investigation.topic)
+    effective_query = payload.query or investigation.seed_query or None
+    result = connector.collect(query=effective_query)
 
     for item in result.observations:
         session.add(
